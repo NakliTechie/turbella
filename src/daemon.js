@@ -7,7 +7,7 @@
 // Localhost / Unix socket only — no network (AGENTS.md privacy rule). Events
 // carry hashes, never raw content.
 
-import { createServer as createNetServer } from 'node:net';
+import { createServer as createNetServer, createConnection } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
 import { readFile, writeFile } from 'node:fs/promises';
 import { unlinkSync, writeFileSync, readFileSync } from 'node:fs';
@@ -44,8 +44,8 @@ async function normalizeHook(env) {
   if (env.type === 'PostToolUseFailure') {
     payload = String(p.error_message ?? p.error ?? '');
     sig = await contentHash(truncate(payload, 1000));
-  } else if (tool && (p.input || p.arguments)) {
-    payload = p.input ?? p.arguments;
+  } else if (tool && (p.tool_input || p.input || p.arguments)) {
+    payload = p.tool_input ?? p.input ?? p.arguments;
     sig = await contentHash(truncate(payload, 4000));
   }
   return {
@@ -63,9 +63,15 @@ async function normalizeHook(env) {
 const __dirname = join(fileURLToPath(import.meta.url), '..');
 const WEB = join(__dirname, '..', 'web');
 
-const STATE_FILE = join(homedir(), '.turbella.state');
-const PORT = Number(process.env.TURBELLA_PORT || 0); // 0 = OS picks a free port
-const IDLE_DEFAULT_MS = 30_000;
+// The state file sits beside the socket, so a test daemon never overwrites
+// the real daemon's address.
+function stateFile() {
+  return process.env.TURBELLA_SOCK ? `${process.env.TURBELLA_SOCK}.state` : join(homedir(), '.turbella.state');
+}
+// A fixed default port keeps the page URL stable across daemon restarts; when
+// it is taken the OS picks a free one and the state file records it.
+const PORT = Number(process.env.TURBELLA_PORT || 7377);
+const IDLE_DEFAULT_MS = 10 * 60_000;
 
 function sockPath() {
   return process.env.TURBELLA_SOCK || join(homedir(), '.turbella.sock');
@@ -77,6 +83,7 @@ let clients = new Set(); // SSE response writers
 let sockServer = null;
 let httpServer = null;
 let idleTimer = null;
+const sockConns = new Set(); // open Unix-socket connections, cut on stop
 
 function touch() {
   lastActivity = Date.now();
@@ -85,7 +92,8 @@ function touch() {
 function resetIdle() {
   if (idleTimer) clearTimeout(idleTimer);
   const idleMs = Number(process.env.TURBELLA_IDLE_MS || IDLE_DEFAULT_MS);
-  idleTimer = setTimeout(stop, idleMs);
+  // An open page keeps the daemon alive: the long waits are what it shows.
+  idleTimer = setTimeout(() => (clients.size ? resetIdle() : stop()), idleMs);
 }
 function broadcast(ev) {
   const line = 'data: ' + JSON.stringify(ev) + '\n\n';
@@ -99,6 +107,7 @@ function broadcast(ev) {
 async function pushEvent(raw) {
   let ev;
   try { ev = JSON.parse(raw); } catch { return; } // swallow malformed lines
+  if (ev?.kind === 'ping') { touch(); return; } // wake-up only, not an event
   if (ev && ev.type) {
     // Hook envelope -> neutral event (async content hash).
     try { ev = await normalizeHook(ev); } catch { /* fall back to raw envelope */ }
@@ -111,6 +120,8 @@ async function pushEvent(raw) {
 }
 
 function handleSocket(socket) {
+  sockConns.add(socket);
+  socket.on('close', () => sockConns.delete(socket));
   let buf = '';
   let processing = Promise.resolve();
   socket.on('data', (chunk) => {
@@ -171,42 +182,78 @@ async function handleHttp(req, res) {
   res.end('not found');
 }
 
-export function start() {
-  return new Promise((resolve, reject) => {
-    try {
-      // Remove a stale socket file before listening.
-      try { unlinkSync(sockPath()); } catch {}
+// Thrown when another daemon already owns the socket; carries its address.
+export class AlreadyRunning extends Error {
+  constructor(state) { super('turbella daemon already running'); this.state = state; }
+}
 
-      sockServer = createNetServer(handleSocket);
-      sockServer.listen(sockPath(), () => {
-        httpServer = createHttpServer(handleHttp);
-        httpServer.on('error', reject);
-        httpServer.listen(PORT, '127.0.0.1', () => {
-          const actualPort = httpServer.address().port;
-          writeFileSync(STATE_FILE, JSON.stringify({ sockPath: sockPath(), port: actualPort }));
-          resetIdle();
-          resolve({ sockPath: sockPath(), port: actualPort });
-        });
-      });
-      sockServer.on('error', reject);
-    } catch (e) { reject(e); }
+function listenSocket(server, path) {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(path, () => { server.off('error', reject); resolve(); });
   });
 }
 
+// A connect that succeeds means a live daemon; ECONNREFUSED means a stale file.
+function socketIsLive(path) {
+  return new Promise((resolve) => {
+    const c = createConnection({ path });
+    c.once('connect', () => { c.destroy(); resolve(true); });
+    c.once('error', () => resolve(false));
+  });
+}
+
+function listenHttp(server, port) {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => { server.off('error', reject); resolve(); });
+  });
+}
+
+export async function start() {
+  const path = sockPath();
+  sockServer = createNetServer(handleSocket);
+  try {
+    await listenSocket(sockServer, path);
+  } catch (e) {
+    if (e.code !== 'EADDRINUSE') throw e;
+    if (await socketIsLive(path)) throw new AlreadyRunning(readState());
+    try { unlinkSync(path); } catch {}
+    await listenSocket(sockServer, path);
+  }
+  httpServer = createHttpServer(handleHttp);
+  try {
+    await listenHttp(httpServer, PORT);
+  } catch (e) {
+    if (e.code !== 'EADDRINUSE' || PORT === 0) throw e;
+    await listenHttp(httpServer, 0);
+  }
+  const port = httpServer.address().port;
+  writeFileSync(stateFile(), JSON.stringify({ sockPath: path, port, pid: process.pid }));
+  resetIdle();
+  return { sockPath: path, port };
+}
+
+// Shutdown is deterministic: the address files go first, so no client reads a
+// dead daemon's address, and open connections are cut instead of awaited, so a
+// lingering keep-alive connection cannot hold the daemon up.
 export function stop() {
   if (idleTimer) clearTimeout(idleTimer);
+  try { unlinkSync(sockPath()); } catch {}
+  try { unlinkSync(stateFile()); } catch {}
   for (const c of clients) { try { c.end(); } catch {} }
   clients.clear();
   events = [];
-  return new Promise((resolve) => {
-    httpServer.close(() => {
-      sockServer.close(() => {
-        try { unlinkSync(sockPath()); } catch {}
-        try { unlinkSync(STATE_FILE); } catch {}
-        resolve();
-      });
-    });
-  });
+  for (const sock of sockConns) sock.destroy();
+  sockConns.clear();
+  const http = httpServer;
+  const net = sockServer;
+  httpServer = null;
+  sockServer = null;
+  return Promise.all([
+    new Promise((r) => (http ? (http.close(() => r()), http.closeAllConnections()) : r())),
+    new Promise((r) => (net ? net.close(() => r()) : r())),
+  ]).then(() => {});
 }
 
 // Exposed for tests only.
@@ -223,6 +270,6 @@ export function __clear() {
 // Read the address the daemon published (port + sock path) for the CLI.
 export function readState() {
   try {
-    return JSON.parse(readFileSync(STATE_FILE, 'utf8'));
+    return JSON.parse(readFileSync(stateFile(), 'utf8'));
   } catch { return null; }
 }

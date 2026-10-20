@@ -8,7 +8,7 @@ import { readClaudeFile } from '../src/reader.js';
 import { KIND } from '../src/event.js';
 import { gaugeSnapshot, createGauge } from '../src/gauge.js';
 import { createPlayer } from '../src/playback.js';
-import { start, stop, __state as daemonState, __clear as daemonClear } from '../src/daemon.js';
+import { start, stop, readState, AlreadyRunning, __state as daemonState, __clear as daemonClear } from '../src/daemon.js';
 import { writeEvent } from '../src/socketWrite.js';
 import { join } from 'node:path';
 import { unlinkSync } from 'node:fs';
@@ -185,13 +185,52 @@ async function main() {
   check('hook write to dead daemon does not throw', threw, false);
 
   process.env.TURBELLA_IDLE_MS = '100';
-  const { port: idlePort } = await start();
+  await start();
   await sleep(300);
-  let idleFailed = false;
-  try { await fetch(`http://127.0.0.1:${idlePort}/events`); } catch { idleFailed = true; }
-  check('idle exit stops the http server', idleFailed, true);
+  // Checked through the files stop() removes, not a fetch: fetch reuses a pooled
+  // keep-alive connection to the fixed port and reaches the closing server.
+  const { existsSync } = await import('node:fs');
+  check('idle exit stops the daemon', readState() === null && !existsSync(testSock), true);
   await stop().catch(() => {});
   delete process.env.TURBELLA_IDLE_MS;
+  delete process.env.TURBELLA_SOCK;
+
+  // ---- the real hook binary --------------------------------------------------
+  // Runs bin/turbella-hook as Claude Code does (payload on stdin), because the
+  // in-process writeEvent checks above passed while the shim dropped every event.
+  const HOOK = join(here, '..', 'bin', 'turbella-hook');
+  const runHook = (payload) => execFileSync(process.execPath, [HOOK], { input: JSON.stringify(payload), encoding: 'utf8' });
+  process.env.TURBELLA_SOCK = '/tmp/turbella-hook.sock';
+  try { unlinkSync('/tmp/turbella-hook.sock'); } catch {}
+  await start();
+  for (let i = 0; i < 5; i++) {
+    runHook({ hook_event_name: 'PreToolUse', session_id: 's-shim', tool_name: 'Bash', tool_input: { command: 'ls' } });
+  }
+  await sleep(100);
+  check('shim delivers 5 of 5 events', daemonState().events, 5);
+  const shimEv = await firstSSE(readState().port);
+  check('shim event carries a tool_input hash', typeof shimEv.sig === 'string' && shimEv.sig.startsWith('sha256:'), true);
+  let already = null;
+  try { await start(); } catch (e) { already = e; }
+  check('second start reports AlreadyRunning', already instanceof AlreadyRunning, true);
+  await stop();
+
+  // With no daemon running, the shim starts one and still delivers.
+  runHook({ hook_event_name: 'PostToolUse', session_id: 's-auto', tool_name: 'Read', tool_input: { file_path: 'x' } });
+  const auto = readState();
+  check('shim autostarts the daemon', auto !== null && typeof auto.pid === 'number', true);
+  if (auto) {
+    const st = await (await fetch(`http://127.0.0.1:${auto.port}/status`)).json();
+    check('autostarted daemon received the event', st.events, 1);
+    try { process.kill(auto.pid); } catch {}
+    await sleep(200);
+  }
+  const ssOut = runHook({ hook_event_name: 'SessionStart', session_id: 's-start' });
+  const ss = readState();
+  check('SessionStart prints the page URL', ss !== null && ssOut.includes(`127.0.0.1:${ss.port}`), true);
+  if (ss) { try { process.kill(ss.pid); } catch {} await sleep(200); }
+  try { unlinkSync('/tmp/turbella-hook.sock'); } catch {}
+  try { unlinkSync('/tmp/turbella-hook.sock.state'); } catch {}
   delete process.env.TURBELLA_SOCK;
 
   // ---- emit + status CLI -----------------------------------------------------

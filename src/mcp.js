@@ -6,17 +6,14 @@
 // Exposes:
 //   tool  turbellla_status  — current session status: events, byKind, gauge, sockPath
 //
-// The daemon's address (port + sock path) is read from ~/.turbella.state,
+// The daemon's address (port + sock path) comes from the daemon's state file,
 // which `turbella start` writes on startup. If the daemon isn't running, the
 // MCP server still initializes but status calls return an isError response.
 //
 // Localhost / stdio only — no network, no secrets (AGENTS.md privacy rule).
 
-import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { readState } from './daemon.js';
 
-const STATE_FILE = join(homedir(), '.turbella.state');
 
 const SERVER_INFO = { name: 'turbella', version: '0.1.0' };
 const PROTOCOL_VERSION = '2024-11-05';
@@ -40,14 +37,6 @@ const RESOURCES = [
     mimeType: 'application/json',
   },
 ];
-
-function readState() {
-  try {
-    return JSON.parse(readFileSync(STATE_FILE, 'utf8'));
-  } catch {
-    return null;
-  }
-}
 
 async function fetchStatus() {
   const st = readState();

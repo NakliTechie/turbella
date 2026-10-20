@@ -2,6 +2,7 @@
   "name": "turbella",
   "version": "0.1.0",
   "description": "Ambient agent-turn visualiser: lanes, tool-kind bars, failure spikes, thinking pulse, turbulence gauge.",
-  "bin": "bin/",
-  "hooks": "hooks/hooks.json"
+  "author": {
+    "name": "NakliTechie"
+  }
 }

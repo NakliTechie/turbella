@@ -1,4 +1,5 @@
 import { createConnection } from 'node:net';
+import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -34,3 +35,32 @@ export function writeEvent(obj, opts = {}) {
 }
 
 export { sockPath };
+
+const DAEMON_BIN = new URL('../bin/turbella', import.meta.url).pathname;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Start the daemon detached so it outlives the hook process that launched it.
+// Two hooks racing here is harmless: the second daemon finds a live socket
+// and exits.
+export function spawnDaemon() {
+  const child = spawn(process.execPath, [DAEMON_BIN, 'start'], {
+    detached: true, stdio: 'ignore', env: process.env,
+  });
+  child.unref();
+}
+
+// Write one event, starting the daemon when nothing listens. Resolves true on
+// delivery, false otherwise; never rejects, so hooks cannot fail loudly. The
+// total wait is capped at `budgetMs`.
+export async function deliver(obj, { budgetMs = 1500 } = {}) {
+  try { await writeEvent(obj); return true; } catch (e) {
+    if (e.code !== 'ENOENT' && e.code !== 'ECONNREFUSED') return false;
+  }
+  spawnDaemon();
+  const deadline = Date.now() + budgetMs;
+  while (Date.now() < deadline) {
+    await sleep(100);
+    try { await writeEvent(obj); return true; } catch {}
+  }
+  return false;
+}

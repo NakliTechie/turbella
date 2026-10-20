@@ -1,16 +1,23 @@
 #!/usr/bin/env node
 // Hook shim: reads one Claude Code hook payload from stdin and forwards a
-// single JSON-line envelope to the Turbella daemon's Unix socket.
+// single JSON-line envelope to the Turbella daemon's Unix socket, starting
+// the daemon if none is running.
 //
-// Never blocks or fails loudly: stdin is read to EOF, the write is
-// fire-and-forget (socketWrite swallows all errors), and the process exits
-// immediately after dispatching. Claude Code runs hooks async, so a slow or
-// unreachable daemon never stalls a tool call.
-import { writeEvent } from '../src/socketWrite.js';
+// Never fails loudly: every error is swallowed and the exit code is always 0.
+// Delivery is awaited (an early exit dropped every event) but capped, and
+// Claude Code runs these hooks async, so a tool call never waits on it.
+//
+// SessionStart runs synchronously instead: it makes sure the daemon is up and
+// tells the person where the page is.
+import { deliver } from '../src/socketWrite.js';
+
+const HARD_EXIT_MS = 2500;
+setTimeout(() => process.exit(0), HARD_EXIT_MS).unref();
 
 let stdin = '';
 process.stdin.on('data', (c) => { stdin += c; });
-process.stdin.on('end', () => {
+process.stdin.on('error', () => process.exit(0));
+process.stdin.on('end', async () => {
   try {
     const payload = JSON.parse(stdin || '{}');
     const envelope = {
@@ -20,8 +27,16 @@ process.stdin.on('end', () => {
       agent: 'claude',
       payload,
     };
-    writeEvent(envelope).catch(() => {});
-  } catch { /* swallow — never fail loudly */ }
+    if (envelope.type === 'SessionStart') {
+      await deliver({ kind: 'ping' });
+      const { readState } = await import('../src/daemon.js');
+      // The socket opens before the page server, so the address can lag a moment.
+      let st = readState();
+      for (let i = 0; !st && i < 10; i++) { await new Promise((r) => setTimeout(r, 100)); st = readState(); }
+      if (st) process.stdout.write(JSON.stringify({ systemMessage: `Turbella: http://127.0.0.1:${st.port}` }));
+    } else {
+      await deliver(envelope);
+    }
+  } catch { /* swallow: never fail loudly */ }
   process.exit(0);
 });
-process.stdin.on('error', () => { process.exit(0); });
