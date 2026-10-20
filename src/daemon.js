@@ -14,7 +14,7 @@ import { unlinkSync, writeFileSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { contentHash, truncate } from './crypto.js';
+import { contentHash, stable, truncate } from './crypto.js';
 import { gaugeSnapshot } from './gauge.js';
 
 // Hook event type -> neutral kind/status.
@@ -46,7 +46,13 @@ async function normalizeHook(env) {
     sig = await contentHash(truncate(payload, 1000));
   } else if (tool && (p.tool_input || p.input || p.arguments)) {
     payload = p.tool_input ?? p.input ?? p.arguments;
-    sig = await contentHash(truncate(payload, 4000));
+    // The model rewrites `description` on every call; drop it so repeats match.
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      const { description, ...rest } = payload;
+      payload = rest;
+    }
+    // Hash canonical JSON: truncate() on an object yields "[object Object]".
+    sig = await contentHash(truncate(stable(payload), 4000));
   }
   return {
     ts: env.ts ?? Date.now(),

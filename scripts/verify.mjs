@@ -210,6 +210,16 @@ async function main() {
   check('shim delivers 5 of 5 events', daemonState().events, 5);
   const shimEv = await firstSSE(readState().port);
   check('shim event carries a tool_input hash', typeof shimEv.sig === 'string' && shimEv.sig.startsWith('sha256:'), true);
+  daemonClear();
+  runHook({ hook_event_name: 'PreToolUse', session_id: 's-shim', tool_name: 'Bash', tool_input: { command: 'ls /nope' } });
+  await sleep(100);
+  const otherEv = await firstSSE(readState().port);
+  check('different tool_input gives a different hash', otherEv.sig !== shimEv.sig, true);
+  daemonClear();
+  runHook({ hook_event_name: 'PreToolUse', session_id: 's-shim', tool_name: 'Bash', tool_input: { command: 'ls', description: 'List files again' } });
+  await sleep(100);
+  const descEv = await firstSSE(readState().port);
+  check('description text does not change the hash', descEv.sig === shimEv.sig, true);
   let already = null;
   try { await start(); } catch (e) { already = e; }
   check('second start reports AlreadyRunning', already instanceof AlreadyRunning, true);
