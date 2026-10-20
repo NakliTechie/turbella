@@ -1,0 +1,27 @@
+#!/usr/bin/env node
+// Hook shim: reads one Claude Code hook payload from stdin and forwards a
+// single JSON-line envelope to the Turbella daemon's Unix socket.
+//
+// Never blocks or fails loudly: stdin is read to EOF, the write is
+// fire-and-forget (socketWrite swallows all errors), and the process exits
+// immediately after dispatching. Claude Code runs hooks async, so a slow or
+// unreachable daemon never stalls a tool call.
+import { writeEvent } from '../src/socketWrite.js';
+
+let stdin = '';
+process.stdin.on('data', (c) => { stdin += c; });
+process.stdin.on('end', () => {
+  try {
+    const payload = JSON.parse(stdin || '{}');
+    const envelope = {
+      type: payload.hook_event_name ?? 'unknown',
+      session: payload.session_id ?? null,
+      ts: Date.now(),
+      agent: 'claude',
+      payload,
+    };
+    writeEvent(envelope).catch(() => {});
+  } catch { /* swallow — never fail loudly */ }
+  process.exit(0);
+});
+process.stdin.on('error', () => { process.exit(0); });

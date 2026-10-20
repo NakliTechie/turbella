@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turbella — replay</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #0b0f19; color: #e2e8f0;
+    font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
+  body { display: grid; grid-template-rows: auto 1fr auto; }
+  header { padding: 10px 14px; border-bottom: 1px solid #1e293b;
+    background: #0f172a; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 14px; margin: 0; letter-spacing: 0.05em; text-transform: uppercase;
+    opacity: 0.7; }
+  button { background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
+    padding: 6px 12px; border-radius: 6px; font: inherit; cursor: pointer; }
+  button:hover { border-color: #64748b; }
+  button.active { background: #2563eb; border-color: #2563eb; }
+  input[type=range] { accent-color: #2563eb; width: 140px; }
+  label { font-size: 12px; opacity: 0.8; margin-right: 6px; }
+  select, input[type=file] { font: inherit; font-size: 12px; padding: 4px;
+    background: #1e293b; border: 1px solid #334155; color: #e2e8f0; border-radius: 4px; }
+  #status { font-size: 12px; opacity: 0.6; margin-left: 10px; }
+  main { position: relative; display: grid; grid-template-rows: 1fr auto; }
+  #wrap { position: relative; background: #050a14; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+  footer { padding: 8px 14px; border-top: 1px solid #1e293b; background: #0f172a;
+    display: flex; gap: 14px; align-items: center; font-size: 12px; opacity: 0.7; }
+  .hint { font-size: 11px; opacity: 0.5; }
+  .overlay { position: absolute; top: 10px; left: 10px; pointer-events: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Turbella · replay</h1>
+  <button id="btnPlay">▶ Play</button>
+  <label>speed</label>
+  <select id="selSpeed">
+    <option value="0.25">¼×</option>
+    <option value="1" selected>1×</option>
+    <option value="2">2×</option>
+    <option value="5">5×</option>
+    <option value="10">10×</option>
+  </select>
+  <label>scrub</label>
+  <input id="scrub" type="range" min="0" max="100" value="0">
+  <label>load</label>
+  <input id="fileInput" type="file" accept=".json,.jsonl,.txt">
+  <div id="status">idle</div>
+</header>
+<main>
+  <div id="wrap">
+    <canvas id="canvas"></canvas>
+    <div class="overlay">
+      <div id="overlayTime" style="font:12px monospace; background:rgba(0,0,0,0.5);
+        padding:2px 6px; border-radius:4px; display:inline-block;">— / —</div>
+    </div>
+  </div>
+</main>
+<footer>
+  <span class="hint">red spike = failed tool · amber = permission wait · violet pulse = thinking · loop glyph = stuck on repeat</span>
+</footer>
+<script type="module">
+  import { createPlayer } from '../src/playback.js';
+  import { createRenderer } from '../src/render.js';
+
+  const canvas = document.getElementById('canvas');
+  const btnPlay = document.getElementById('btnPlay');
+  const selSpeed = document.getElementById('selSpeed');
+  const scrub = document.getElementById('scrub');
+  const fileInput = document.getElementById('fileInput');
+  const status = document.getElementById('status');
+  const overlayTime = document.getElementById('overlayTime');
+
+  const renderer = createRenderer(canvas);
+  window.addEventListener('resize', () => renderer.resize());
+  renderer.resize();
+
+  // ---- embedded example (retry-loop fixture, neutral record) ----------------
+
+  const EXAMPLE = [
+    { ts: 1000, agent: 'claude', session: 's-retry', kind: 'think', status: 'ok', tool: null, dur_ms: 1200, sig: 'sha256:think1' },
+    { ts: 1500, agent: 'claude', session: 's-retry', kind: 'tool', status: 'ok', tool: 'Bash', dur_ms: 1500, sig: 'sha256:git-push' },
+    { ts: 3000, agent: 'claude', session: 's-retry', kind: 'tool_fail', status: 'error', tool: 'Bash', dur_ms: 1500, sig: 'sha256:fail-git-push' },
+    { ts: 4000, agent: 'claude', session: 's-retry', kind: 'tool', status: 'ok', tool: 'Bash', dur_ms: 1500, sig: 'sha256:git-push' },
+    { ts: 5500, agent: 'claude', session: 's-retry', kind: 'tool_fail', status: 'error', tool: 'Bash', dur_ms: 1500, sig: 'sha256:fail-git-push' },
+    { ts: 7000, agent: 'claude', session: 's-retry', kind: 'tool', status: 'ok', tool: 'Write', dur_ms: 200, sig: 'sha256:write-notes' },
+  ];
+
+  // ---- neutral event record loader ------------------------------------------
+
+  function parseJsonl(text) {
+    const events = [];
+    for (const line of text.split(/\r?\n/)) {
+      const s = line.trim();
+      if (!s) continue;
+      try { events.push(JSON.parse(s)); } catch { /* skip torn lines */ }
+    }
+    return events;
+  }
+
+  function normalize(raw) {
+    // Accept either a neutral event array or Claude Code JSONL (best-effort convert).
+    if (Array.isArray(raw) && raw[0] && raw[0].kind) return raw;
+    const events = [];
+    const pending = new Map();
+    for (const m of raw) {
+      if (m.kind) { events.push(m); continue; }
+      if (m.type === 'assistant' && m.message) {
+        if (typeof m.message.thinkingDurationMs === 'number') {
+          events.push({ ts: Date.parse(m.timestamp), agent: 'claude', session: m.sessionId, kind: 'think',
+            status: 'ok', tool: null, dur_ms: m.message.thinkingDurationMs, sig: 'sha256:think' });
+        }
+        for (const b of (m.message.content || [])) {
+          if (b.type === 'tool_use') pending.set(b.id, { name: b.name, input: b.input, ts: Date.parse(m.timestamp) });
+          else if (b.type === 'tool_result') {
+            const c = pending.get(b.tool_use_id);
+            if (c) {
+              const isErr = b.is_error === true;
+              events.push({ ts: Date.parse(b.timestamp), agent: 'claude', session: m.sessionId,
+                kind: isErr ? 'tool_fail' : 'tool', status: isErr ? 'error' : 'ok', tool: c.name,
+                dur_ms: Date.parse(b.timestamp) - c.ts,
+                sig: 'sha256:' + (isErr ? String(b.content) : JSON.stringify(c.input)) });
+              pending.delete(b.tool_use_id);
+            }
+          }
+        }
+      }
+    }
+    return events;
+  }
+
+  // ---- player + render loop -------------------------------------------------
+
+  let player = null;
+  let allEvents = [];
+  let raf = null;
+
+  function setEvents(raw) {
+    const events = normalize(Array.isArray(raw) ? raw : parseJsonl(String(raw)));
+    allEvents = events;
+    const start = events[0]?.ts ?? 0;
+    player = createPlayer(events, { startTime: start, playing: false, speed: 1 });
+    scrub.max = 100;
+    scrub.value = 0;
+    status.textContent = `${events.length} events · ${new Set(events.map(e => e.agent)).size} agents`;
+    renderer.feed(player.snapshot(), events);
+    renderer.draw();
+    overlayTime.textContent = formatMs(0) + ' / ' + formatMs((events[events.length - 1]?.ts ?? 0) - start);
+    btnPlay.textContent = '▶ Play';
+    if (raf) cancelAnimationFrame(raf);
+    raf = null;
+  }
+
+  function formatMs(ms) {
+    const s = Math.max(0, Math.round(ms / 1000));
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return m ? `${m}:${String(r).padStart(2, '0')}` : `${r}s`;
+  }
+
+  function loop() {
+    const s = player.tick(performance.now());
+    renderer.feed(s, allEvents);
+    renderer.draw();
+    scrub.value = Math.round(s.progress * 100);
+    overlayTime.textContent = formatMs(s.time - (allEvents[0]?.ts ?? 0)) + ' / ' + formatMs(s.duration);
+    if (s.playing && s.arrived < s.total) raf = requestAnimationFrame(loop);
+    else { btnPlay.textContent = '▶ Play'; raf = null; }
+  }
+
+  btnPlay.addEventListener('click', () => {
+    if (!player) return;
+    player.toggle();
+    btnPlay.textContent = player.playing ? '⏸ Pause' : '▶ Play';
+    if (player.playing) loop();
+  });
+
+  selSpeed.addEventListener('change', () => { if (player) player.setSpeed(Number(selSpeed.value)); });
+  scrub.addEventListener('input', () => {
+    if (!player) return;
+    const t = allEvents[0]?.ts ?? 0;
+    const dur = (allEvents[allEvents.length - 1]?.ts ?? t) - t;
+    player.seek(t + (Number(scrub.value) / 100) * dur);
+    renderer.feed(player.snapshot(), allEvents);
+    renderer.draw();
+    overlayTime.textContent = formatMs(player.time - t) + ' / ' + formatMs(dur);
+    btnPlay.textContent = '▶ Play';
+  });
+
+  fileInput.addEventListener('change', (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    status.textContent = 'reading ' + f.name + '…';
+    const r = new FileReader();
+    r.onload = () => { setEvents(r.result); status.textContent = 'loaded ' + f.name; };
+    r.onerror = () => { status.textContent = 'read failed'; };
+    r.readAsText(f);
+  });
+
+  // ---- live mode: connect to the daemon's SSE stream -----------------------
+
+  let liveSource = null;
+
+  function handleLiveEvent(ev) {
+    // Daemon already normalizes to neutral events.
+    allEvents.push(ev);
+    player.append([ev]);
+    status.textContent = `${allEvents.length} events · live`;
+  }
+
+  function connectLive() {
+    if (liveSource) return;
+    const url = `${location.protocol}//${location.host}/events`;
+    liveSource = new EventSource(url);
+    liveSource.onmessage = (e) => {
+      try { handleLiveEvent(JSON.parse(e.data)); } catch {}
+    };
+    liveSource.onerror = () => {
+      try { liveSource.close(); } catch {}
+      liveSource = null;
+      setTimeout(connectLive, 2000);
+    };
+    status.textContent = 'live · waiting for events…';
+  }
+
+  // Auto-connect when served over http (i.e. by the daemon).
+  if (location.protocol === 'http:' || location.protocol === 'https:') {
+    connectLive();
+  }
+
+  // kick off with the embedded example (replaced by real events once live)
+  setEvents(EXAMPLE);
+</script>
+</body>
+</html>
+

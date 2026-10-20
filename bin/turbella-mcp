@@ -1,0 +1,11 @@
+#!/usr/bin/env node
+// Turbella MCP server entry point: runs the stdio JSON-RPC MCP server that
+// exposes `turbella_status` (tool) and `turbella://status` (read-only resource).
+// Connect an MCP client to this binary; it reads the daemon's address from
+// ~/.turbella.state (written by `turbella start`).
+import { runMcp } from '../src/mcp.js';
+
+runMcp().catch((err) => {
+  console.error(`turbella-mcp: ${err.message}`);
+  process.exit(1);
+});

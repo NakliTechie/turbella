@@ -1,0 +1,17 @@
+{
+  "name": "turbella",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Winamp-style visualiser for the long waits in an agent turn. Standalone plugin + daemon; Claude Code, Codex, opencode and ACP feed it.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "turbella": "./bin/turbella"
+  },
+  "scripts": {
+    "verify": "node scripts/verify.mjs"
+  },
+  "license": "UNLICENSED"
+}

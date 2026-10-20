@@ -1,0 +1,13 @@
+{
+  "PreToolUse": { "command": "turbella-hook", "async": true },
+  "PostToolUse": { "command": "turbella-hook", "async": true },
+  "PostToolUseFailure": { "command": "turbella-hook", "async": true },
+  "PermissionRequest": { "command": "turbella-hook", "async": true },
+  "PermissionDenied": { "command": "turbella-hook", "async": true },
+  "Notification": { "command": "turbella-hook", "async": true },
+  "SubagentStart": { "command": "turbella-hook", "async": true },
+  "SubagentStop": { "command": "turbella-hook", "async": true },
+  "Stop": { "command": "turbella-hook", "async": true },
+  "StopFailure": { "command": "turbella-hook", "async": true },
+  "PreCompact": { "command": "turbella-hook", "async": true }
+}

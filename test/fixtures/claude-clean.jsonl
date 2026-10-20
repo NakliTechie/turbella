@@ -1,0 +1,6 @@
+{"type":"assistant","uuid":"u1","sessionId":"s-clean","timestamp":"2026-10-20T11:00:00.000Z","cwd":"/tmp/proj","message":{"model":"claude-4","content":[{"type":"tool_use","id":"c1","name":"Read","input":{"file":"a.txt"}}] }}
+{"type":"tool","sessionId":"s-clean","timestamp":"2026-10-20T11:00:00.300Z","tool_use_id":"c1","content":"file contents","is_error":false}
+{"type":"assistant","uuid":"u2","sessionId":"s-clean","timestamp":"2026-10-20T11:00:01.000Z","cwd":"/tmp/proj","message":{"model":"claude-4","content":[{"type":"tool_use","id":"c2","name":"Bash","input":{"command":"ls"}}] }}
+{"type":"tool","sessionId":"s-clean","timestamp":"2026-10-20T11:00:01.200Z","tool_use_id":"c2","content":"a.txt\nb.txt","is_error":false}
+{"type":"assistant","uuid":"u3","sessionId":"s-clean","timestamp":"2026-10-20T11:00:02.000Z","cwd":"/tmp/proj","message":{"model":"claude-4","content":[{"type":"tool_use","id":"c3","name":"Write","input":{"file":"c.txt","content":"x"}}] }}
+{"type":"tool","sessionId":"s-clean","timestamp":"2026-10-20T11:00:02.300Z","tool_use_id":"c3","content":"ok","is_error":false}
