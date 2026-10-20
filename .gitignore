@@ -1,0 +1,8 @@
+.DS_Store
+*.log
+/plan
+.artifacts/
+tmp/
+node_modules/
+.venv/
+__pycache__/
