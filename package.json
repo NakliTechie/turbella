@@ -11,7 +11,8 @@
     "turbella": "./bin/turbella"
   },
   "scripts": {
-    "verify": "node scripts/verify.mjs"
+    "verify": "node scripts/verify.mjs",
+    "ttfv": "node scripts/ttfv.mjs"
   },
   "license": "UNLICENSED"
 }
