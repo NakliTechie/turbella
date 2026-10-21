@@ -1,11 +1,62 @@
 #!/usr/bin/env node
-// Turbella CLI: `turbella start` launches the daemon; `turbella emit` sends a
-// single event to the daemon's Unix socket so any agent can report meaning
-// hooks cannot know ("switching approach", "stuck", ...).
-import { start, stop, readState, AlreadyRunning } from '../src/daemon.js';
-import { writeEvent, deliver } from '../src/socketWrite.js';
+// Turbella CLI. `turbella start` runs the daemon in the foreground; every other
+// command is a tool from src/manifest.js, run through the same handler the MCP
+// server uses (src/tools.js).
+//
+//   turbella start
+//   turbella status
+//   turbella open
+//   turbella emit [--kind K] [--status S] [--tool T] [--session ID] [--payload JSON]
+//   turbella replay <transcript.jsonl>
+import { start, stop, AlreadyRunning } from '../src/daemon.js';
+import { HANDLERS } from '../src/tools.js';
 
-const cmd = process.argv[2];
+const USAGE = 'usage: turbella start | status | open | replay <file.jsonl> | emit [--kind K] [--status S] [--tool T] [--session ID] [--payload JSON]';
+const [cmd, ...rest] = process.argv.slice(2);
+
+// Parse `--key value` pairs; a bare word becomes a positional argument.
+function parseArgs(argv) {
+  const out = { _: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith('--')) { out._.push(a); continue; }
+    const next = argv[i + 1];
+    if (next !== undefined && !next.startsWith('--')) { out[a.slice(2)] = next; i++; }
+    else out[a.slice(2)] = true;
+  }
+  return out;
+}
+
+// Map CLI words onto each tool's input object.
+const INPUTS = {
+  status: () => ({}),
+  open: () => ({}),
+  replay: (a) => ({ path: a._[0] }),
+  emit: (a) => {
+    let payload;
+    if (a.payload !== undefined) {
+      try { payload = JSON.parse(a.payload); } catch { payload = a.payload; }
+    }
+    return { kind: a.kind, status: a.status, tool: a.tool, session: a.session, payload };
+  },
+};
+
+async function runTool(name) {
+  const input = INPUTS[name](parseArgs(rest));
+  if (name === 'emit') {
+    // emit never fails loudly and prints nothing: agents call it mid-task.
+    try { await HANDLERS.emit(input); } catch {}
+    process.exit(0);
+  }
+  try {
+    const result = await HANDLERS[name](input);
+    console.log(name === 'open' ? result.url : JSON.stringify(result, null, 2));
+    process.exit(0);
+  } catch (e) {
+    console.error(`turbella ${name}: ${e.message}`);
+    process.exit(1);
+  }
+}
 
 if (cmd === 'start') {
   start().then(({ sockPath, port }) => {
@@ -23,96 +74,11 @@ if (cmd === 'start') {
     console.error(`turbella: ${e.message}`);
     process.exit(1);
   });
-} else if (cmd === 'open') {
-  openCli();
-} else if (cmd === 'emit') {
-  emitCli();
-} else if (cmd === 'status') {
-  statusCli();
+} else if (HANDLERS[cmd]) {
+  runTool(cmd);
 } else if (cmd === '--version' || cmd === '-v') {
   console.log('0.1.0');
 } else {
-  console.error('usage: turbella start | open | emit [--kind X] [--tool Y] [--session Z] [--payload JSON] | status [--json]');
+  console.error(USAGE);
   process.exit(1);
 }
-
-// Start the daemon when needed, then open the page in the default browser.
-async function openCli() {
-  await deliver({ kind: 'ping' });
-  let st = readState();
-  for (let i = 0; !st && i < 10; i++) { await new Promise((r) => setTimeout(r, 100)); st = readState(); }
-  if (!st) { console.error('turbella open: daemon did not start'); process.exit(1); }
-  const url = `http://127.0.0.1:${st.port}`;
-  const { spawn } = await import('node:child_process');
-  const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
-  spawn(opener, [url], { stdio: 'ignore', detached: true }).unref();
-  console.log(url);
-}
-
-async function statusCli() {
-  const st = readState();
-  if (!st) {
-    console.error('turbella status: daemon not running (no state file)');
-    process.exit(1);
-  }
-  let body;
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch(`http://127.0.0.1:${st.port}/status`, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    body = await res.json();
-  } catch (e) {
-    console.error(`turbella status: cannot reach daemon at ${st.port} (${e.message})`);
-    process.exit(1);
-  }
-  console.log(JSON.stringify(body, null, 2));
-}
-
-// Parse `--key value` pairs from argv.
-function parseArgs(argv) {
-  const out = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a.startsWith('--')) {
-      const key = a.slice(2);
-      const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith('--')) {
-        out[key] = next;
-        i++;
-      } else {
-        out[key] = true;
-      }
-    }
-  }
-  return out;
-}
-
-async function emitCli() {
-  const a = parseArgs(process.argv.slice(3));
-  let sig = a.sig ?? null;
-  let payload = null;
-  if (a.payload) {
-    try { payload = JSON.parse(a.payload); } catch { payload = a.payload; }
-  }
-  if (sig === null && payload !== null) {
-    const { contentHash } = await import('../src/crypto.js');
-    sig = await contentHash(payload);
-  }
-  const event = {
-    kind: a.kind ?? 'tool',
-    status: a.status ?? 'ok',
-    tool: a.tool ?? null,
-    session: a.session ?? null,
-    dur_ms: a['dur-ms'] != null ? Number(a['dur-ms']) : null,
-    sig,
-    ts: Date.now(),
-    agent: 'emit',
-  };
-  // Fire-and-forget for hooks; awaited here so the emit CLI actually delivers
-  // before exiting (the socket connect is async). Delivery errors are swallowed
-  // so emit never blocks or fails loudly, same as hooks.
-  try { await writeEvent(event); } catch {}
-  process.exit(0);
-}
-

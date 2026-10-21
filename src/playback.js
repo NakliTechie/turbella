@@ -12,8 +12,8 @@
 
 export function createPlayer(events = [], opts = {}) {
   const evs = events.slice().sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
-  const first = evs[0]?.ts ?? 0;
-  const last = evs[evs.length - 1]?.ts ?? first;
+  let first = evs[0]?.ts ?? 0; // moves only when a live stream starts empty
+  let last = evs[evs.length - 1]?.ts ?? first;
 
   let time = opts.startTime != null ? opts.startTime : first;
   let playing = !!opts.playing;
@@ -104,6 +104,7 @@ export function createPlayer(events = [], opts = {}) {
       while (j < toAdd.length) merged.push(toAdd[j++]);
       evs.length = 0;
       evs.push(...merged);
+      if (merged.length === toAdd.length) first = evs[0]?.ts ?? first; // was empty
       last = evs[evs.length - 1]?.ts ?? first;
       // recompute arrived frontier
       arrived = 0;

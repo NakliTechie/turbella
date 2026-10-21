@@ -4,7 +4,9 @@
 // implement directly.
 //
 // Exposes:
-//   tool  turbellla_status  — current session status: events, byKind, gauge, sockPath
+//   tools     every daemon tool in manifest.js, as turbella_<name>, run through
+//             the same handlers as the CLI (tools.js)
+//   resource  turbella://status — the status tool's result
 //
 // The daemon's address (port + sock path) comes from the daemon's state file,
 // which `turbella start` writes on startup. If the daemon isn't running, the
@@ -12,7 +14,8 @@
 //
 // Localhost / stdio only — no network, no secrets (AGENTS.md privacy rule).
 
-import { readState } from './daemon.js';
+import { HANDLERS } from './tools.js';
+import { toolsFor } from './manifest.js';
 
 
 const SERVER_INFO = { name: 'turbella', version: '0.1.0' };
@@ -20,14 +23,12 @@ const PROTOCOL_VERSION = '2024-11-05';
 
 const CAPABILITIES = { resources: {}, tools: {} };
 
-const TOOLS = [
-  {
-    name: 'turbella_status',
-    description:
-      'Current Turbella daemon status: number of events, counts by kind, turbulence gauge (0..1), and daemon socket path.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-  },
-];
+const PREFIX = 'turbella_';
+const TOOLS = toolsFor('daemon').map((t) => ({
+  name: PREFIX + t.name,
+  description: t.description,
+  inputSchema: t.inputSchema,
+}));
 
 const RESOURCES = [
   {
@@ -39,21 +40,8 @@ const RESOURCES = [
 ];
 
 async function fetchStatus() {
-  const st = readState();
-  if (!st || !st.port) {
-    return { ok: false, error: 'turbella daemon not running (no state file)' };
-  }
-  try {
-    const res = await fetch(`http://127.0.0.1:${st.port}/status`, {
-      signal: AbortSignal.timeout(3000),
-    });
-    if (!res.ok) {
-      return { ok: false, error: `daemon /status returned ${res.status}` };
-    }
-    return { ok: true, value: await res.json() };
-  } catch (e) {
-    return { ok: false, error: `cannot reach daemon at ${st.port}: ${e.message}` };
-  }
+  try { return { ok: true, value: await HANDLERS.status({}) }; }
+  catch (e) { return { ok: false, error: `turbella ${e.message}` }; }
 }
 
 function jsonRpc(id, result) {
@@ -153,21 +141,16 @@ async function handleLine(stdout, line) {
 }
 
 async function handleToolCall(name, args) {
-  if (name === 'turbella_status') {
-    const status = await fetchStatus();
-    if (!status.ok)
-      return {
-        content: [{ type: 'text', text: JSON.stringify(status, null, 2) }],
-        isError: true,
-      };
-    return {
-      content: [{ type: 'text', text: JSON.stringify(status.value, null, 2) }],
-    };
+  const tool = name?.startsWith(PREFIX) ? HANDLERS[name.slice(PREFIX.length)] : null;
+  if (!tool) {
+    return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
   }
-  return {
-    content: [{ type: 'text', text: `Unknown tool: ${name}` }],
-    isError: true,
-  };
+  try {
+    const value = await tool(args ?? {});
+    return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: e.message }], isError: true };
+  }
 }
 
 async function handleResourceRead(uri) {

@@ -184,6 +184,17 @@ async function handleHttp(req, res) {
     res.end(html);
     return;
   }
+  // The page's ES modules. Only bare lowercase names under src/, so a request
+  // cannot climb out of the folder.
+  const mod = u.pathname.match(/^\/src\/([a-z]+\.js)$/);
+  if (mod) {
+    try {
+      const js = await readFile(join(__dirname, mod[1]), 'utf8');
+      res.writeHead(200, { 'Content-Type': 'text/javascript' });
+      res.end(js);
+      return;
+    } catch { /* fall through to 404 */ }
+  }
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('not found');
 }

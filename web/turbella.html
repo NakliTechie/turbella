@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Turbella — replay</title>
+<title>Turbella</title>
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: #0b0f19; color: #e2e8f0;
@@ -32,10 +32,11 @@
 </head>
 <body>
 <header>
-  <h1>Turbella · replay</h1>
-  <button id="btnPlay">▶ Play</button>
+  <h1>Turbella</h1>
+  <button id="btnPlay" data-tool="play pause">▶ Play</button>
+  <button id="btnLive" data-tool="go_live">● Live</button>
   <label>speed</label>
-  <select id="selSpeed">
+  <select id="selSpeed" data-tool="set_speed">
     <option value="0.25">¼×</option>
     <option value="1" selected>1×</option>
     <option value="2">2×</option>
@@ -43,9 +44,9 @@
     <option value="10">10×</option>
   </select>
   <label>scrub</label>
-  <input id="scrub" type="range" min="0" max="100" value="0">
+  <input id="scrub" data-tool="seek" type="range" min="0" max="100" value="0">
   <label>load</label>
-  <input id="fileInput" type="file" accept=".json,.jsonl,.txt">
+  <input id="fileInput" data-tool="load_events" type="file" accept=".json,.jsonl,.txt">
   <div id="status">idle</div>
 </header>
 <main>
@@ -60,23 +61,32 @@
 <footer>
   <span class="hint">red spike = failed tool · amber = permission wait · violet pulse = thinking · loop glyph = stuck on repeat</span>
 </footer>
+
 <script type="module">
+  // One core, two doors: every control below calls a handler in TOOLS, and the
+  // same handlers are published to agents (navigator.modelContext where the
+  // browser has it, window.turbella.tools otherwise). Names come from
+  // src/manifest.js; scripts/verify.mjs checks the page against it.
   import { createPlayer } from '../src/playback.js';
   import { createRenderer } from '../src/render.js';
+  import { readClaudeEvents } from '../src/transcript.js';
+  import { toolsFor } from '../src/manifest.js';
 
-  const canvas = document.getElementById('canvas');
-  const btnPlay = document.getElementById('btnPlay');
-  const selSpeed = document.getElementById('selSpeed');
-  const scrub = document.getElementById('scrub');
-  const fileInput = document.getElementById('fileInput');
-  const status = document.getElementById('status');
-  const overlayTime = document.getElementById('overlayTime');
+  const $ = (id) => document.getElementById(id);
+  const canvas = $('canvas');
+  const btnPlay = $('btnPlay');
+  const btnLive = $('btnLive');
+  const selSpeed = $('selSpeed');
+  const scrub = $('scrub');
+  const fileInput = $('fileInput');
+  const status = $('status');
+  const overlayTime = $('overlayTime');
 
   const renderer = createRenderer(canvas);
-  window.addEventListener('resize', () => renderer.resize());
+  window.addEventListener('resize', () => { renderer.resize(); draw(); });
   renderer.resize();
 
-  // ---- embedded example (retry-loop fixture, neutral record) ----------------
+  // ---- embedded example (shown until real events load or arrive) ------------
 
   const EXAMPLE = [
     { ts: 1000, agent: 'claude', session: 's-retry', kind: 'think', status: 'ok', tool: null, dur_ms: 1200, sig: 'sha256:think1' },
@@ -87,70 +97,15 @@
     { ts: 7000, agent: 'claude', session: 's-retry', kind: 'tool', status: 'ok', tool: 'Write', dur_ms: 200, sig: 'sha256:write-notes' },
   ];
 
-  // ---- neutral event record loader ------------------------------------------
+  // ---- state ------------------------------------------------------------------
 
-  function parseJsonl(text) {
-    const events = [];
-    for (const line of text.split(/\r?\n/)) {
-      const s = line.trim();
-      if (!s) continue;
-      try { events.push(JSON.parse(s)); } catch { /* skip torn lines */ }
-    }
-    return events;
-  }
-
-  function normalize(raw) {
-    // Accept either a neutral event array or Claude Code JSONL (best-effort convert).
-    if (Array.isArray(raw) && raw[0] && raw[0].kind) return raw;
-    const events = [];
-    const pending = new Map();
-    for (const m of raw) {
-      if (m.kind) { events.push(m); continue; }
-      if (m.type === 'assistant' && m.message) {
-        if (typeof m.message.thinkingDurationMs === 'number') {
-          events.push({ ts: Date.parse(m.timestamp), agent: 'claude', session: m.sessionId, kind: 'think',
-            status: 'ok', tool: null, dur_ms: m.message.thinkingDurationMs, sig: 'sha256:think' });
-        }
-        for (const b of (m.message.content || [])) {
-          if (b.type === 'tool_use') pending.set(b.id, { name: b.name, input: b.input, ts: Date.parse(m.timestamp) });
-          else if (b.type === 'tool_result') {
-            const c = pending.get(b.tool_use_id);
-            if (c) {
-              const isErr = b.is_error === true;
-              events.push({ ts: Date.parse(b.timestamp), agent: 'claude', session: m.sessionId,
-                kind: isErr ? 'tool_fail' : 'tool', status: isErr ? 'error' : 'ok', tool: c.name,
-                dur_ms: Date.parse(b.timestamp) - c.ts,
-                sig: 'sha256:' + (isErr ? String(b.content) : JSON.stringify(c.input)) });
-              pending.delete(b.tool_use_id);
-            }
-          }
-        }
-      }
-    }
-    return events;
-  }
-
-  // ---- player + render loop -------------------------------------------------
-
-  let player = null;
+  let player = createPlayer([]);
   let allEvents = [];
   let raf = null;
+  let live = null; // EventSource while following the daemon
 
-  function setEvents(raw) {
-    const events = normalize(Array.isArray(raw) ? raw : parseJsonl(String(raw)));
-    allEvents = events;
-    const start = events[0]?.ts ?? 0;
-    player = createPlayer(events, { startTime: start, playing: false, speed: 1 });
-    scrub.max = 100;
-    scrub.value = 0;
-    status.textContent = `${events.length} events · ${new Set(events.map(e => e.agent)).size} agents`;
-    renderer.feed(player.snapshot(), events);
-    renderer.draw();
-    overlayTime.textContent = formatMs(0) + ' / ' + formatMs((events[events.length - 1]?.ts ?? 0) - start);
-    btnPlay.textContent = '▶ Play';
-    if (raf) cancelAnimationFrame(raf);
-    raf = null;
-  }
+  const t0 = () => allEvents[0]?.ts ?? 0;
+  const span = () => (allEvents[allEvents.length - 1]?.ts ?? t0()) - t0();
 
   function formatMs(ms) {
     const s = Math.max(0, Math.round(ms / 1000));
@@ -159,78 +114,137 @@
     return m ? `${m}:${String(r).padStart(2, '0')}` : `${r}s`;
   }
 
+  function draw(snap = player.snapshot()) {
+    renderer.feed(snap, allEvents);
+    renderer.draw();
+    scrub.value = Math.round((snap.progress || 0) * 100);
+    overlayTime.textContent = formatMs(snap.time - t0()) + ' / ' + formatMs(span());
+    btnPlay.textContent = player.playing ? '⏸ Pause' : '▶ Play';
+    btnLive.classList.toggle('active', !!live);
+  }
+
   function loop() {
     const s = player.tick(performance.now());
-    renderer.feed(s, allEvents);
-    renderer.draw();
-    scrub.value = Math.round(s.progress * 100);
-    overlayTime.textContent = formatMs(s.time - (allEvents[0]?.ts ?? 0)) + ' / ' + formatMs(s.duration);
+    draw(s);
     if (s.playing && s.arrived < s.total) raf = requestAnimationFrame(loop);
-    else { btnPlay.textContent = '▶ Play'; raf = null; }
+    else { raf = null; if (s.playing) player.pause(); draw(); }
   }
 
-  btnPlay.addEventListener('click', () => {
-    if (!player) return;
-    player.toggle();
-    btnPlay.textContent = player.playing ? '⏸ Pause' : '▶ Play';
-    if (player.playing) loop();
-  });
+  function stopLive() {
+    if (live) { live.close(); live = null; }
+  }
 
-  selSpeed.addEventListener('change', () => { if (player) player.setSpeed(Number(selSpeed.value)); });
-  scrub.addEventListener('input', () => {
-    if (!player) return;
-    const t = allEvents[0]?.ts ?? 0;
-    const dur = (allEvents[allEvents.length - 1]?.ts ?? t) - t;
-    player.seek(t + (Number(scrub.value) / 100) * dur);
-    renderer.feed(player.snapshot(), allEvents);
-    renderer.draw();
-    overlayTime.textContent = formatMs(player.time - t) + ' / ' + formatMs(dur);
-    btnPlay.textContent = '▶ Play';
-  });
+  function show(events, label) {
+    if (raf) cancelAnimationFrame(raf);
+    raf = null;
+    allEvents = events;
+    player = createPlayer(events, { startTime: t0(), speed: Number(selSpeed.value) });
+    player.pause();
+    status.textContent = label ?? `${events.length} events · ${new Set(events.map((e) => e.agent)).size} agents`;
+    draw();
+  }
 
-  fileInput.addEventListener('change', (e) => {
-    const f = e.target.files[0];
+  // Neutral event array, or Claude Code JSONL text parsed by the shared reader
+  // (hashes only, same as the CLI).
+  async function toEvents(input) {
+    if (Array.isArray(input)) return input;
+    const text = String(input);
+    const lines = text.split(/\r?\n/);
+    const first = lines.find((l) => l.trim());
+    try { if (first && JSON.parse(first).kind) return lines.filter((l) => l.trim()).map((l) => JSON.parse(l)); } catch {}
+    const events = [];
+    for await (const ev of readClaudeEvents(lines)) events.push(ev);
+    return events;
+  }
+
+  // ---- tools: the one core every control and every agent call goes through ----
+
+  const TOOLS = {
+    play() {
+      if (!allEvents.length) return { playing: false };
+      if (player.progress >= 1) player.seek(t0());
+      player.play();
+      if (!raf) loop();
+      return { playing: true };
+    },
+    pause() {
+      player.pause();
+      draw();
+      return { playing: false };
+    },
+    set_speed({ speed }) {
+      const was = player.playing;
+      player.setSpeed(Number(speed));
+      if (!was) player.pause();
+      selSpeed.value = String(speed);
+      return { speed: player.speed };
+    },
+    seek({ fraction }) {
+      const f = Math.min(Math.max(Number(fraction) || 0, 0), 1);
+      player.seek(t0() + f * span());
+      draw();
+      return { time: player.time };
+    },
+    async load_events({ events }) {
+      stopLive();
+      const evs = await toEvents(events);
+      show(evs);
+      return { events: evs.length };
+    },
+    go_live() {
+      if (live) return { live: true };
+      if (!/^https?:$/.test(location.protocol)) throw new Error('live needs the page served by the daemon (turbella open)');
+      show([], 'live · waiting for events…');
+      live = new EventSource('/events');
+      live.onmessage = (e) => {
+        let ev;
+        try { ev = JSON.parse(e.data); } catch { return; }
+        allEvents.push(ev);
+        player.append([ev]);
+        player.seek(ev.ts); // follow the newest event
+        status.textContent = `${allEvents.length} events · live`;
+        draw();
+      };
+      live.onerror = () => { status.textContent = 'live · reconnecting…'; };
+      draw();
+      return { live: true };
+    },
+  };
+
+  // Publish the agent face from the manifest; refuse to load if a tool lacks a handler.
+  const PAGE_TOOLS = toolsFor('page');
+  for (const t of PAGE_TOOLS) {
+    if (!TOOLS[t.name]) throw new Error(`manifest tool "${t.name}" has no page handler`);
+  }
+  window.turbella = { tools: Object.fromEntries(PAGE_TOOLS.map((t) => [t.name, (args = {}) => TOOLS[t.name](args)])) };
+  if (navigator.modelContext?.registerTool) {
+    for (const t of PAGE_TOOLS) {
+      navigator.modelContext.registerTool({
+        name: t.name, description: t.description, inputSchema: t.inputSchema,
+        execute: async (args) => ({ content: [{ type: 'text', text: JSON.stringify(await TOOLS[t.name](args ?? {})) }] }),
+      });
+    }
+  }
+
+  // ---- the human door: controls call the same tools -------------------------
+
+  btnPlay.addEventListener('click', () => (player.playing ? TOOLS.pause() : TOOLS.play()));
+  btnLive.addEventListener('click', () => { try { TOOLS.go_live(); } catch (e) { status.textContent = e.message; } });
+  selSpeed.addEventListener('change', () => TOOLS.set_speed({ speed: Number(selSpeed.value) }));
+  scrub.addEventListener('input', () => TOOLS.seek({ fraction: Number(scrub.value) / 100 }));
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files[0];
     if (!f) return;
     status.textContent = 'reading ' + f.name + '…';
-    const r = new FileReader();
-    r.onload = () => { setEvents(r.result); status.textContent = 'loaded ' + f.name; };
-    r.onerror = () => { status.textContent = 'read failed'; };
-    r.readAsText(f);
+    f.text()
+      .then((text) => TOOLS.load_events({ events: text }))
+      .then(() => { status.textContent = 'loaded ' + f.name; })
+      .catch(() => { status.textContent = 'read failed'; });
   });
 
-  // ---- live mode: connect to the daemon's SSE stream -----------------------
-
-  let liveSource = null;
-
-  function handleLiveEvent(ev) {
-    // Daemon already normalizes to neutral events.
-    allEvents.push(ev);
-    player.append([ev]);
-    status.textContent = `${allEvents.length} events · live`;
-  }
-
-  function connectLive() {
-    if (liveSource) return;
-    const url = `${location.protocol}//${location.host}/events`;
-    liveSource = new EventSource(url);
-    liveSource.onmessage = (e) => {
-      try { handleLiveEvent(JSON.parse(e.data)); } catch {}
-    };
-    liveSource.onerror = () => {
-      try { liveSource.close(); } catch {}
-      liveSource = null;
-      setTimeout(connectLive, 2000);
-    };
-    status.textContent = 'live · waiting for events…';
-  }
-
-  // Auto-connect when served over http (i.e. by the daemon).
-  if (location.protocol === 'http:' || location.protocol === 'https:') {
-    connectLive();
-  }
-
-  // kick off with the embedded example (replaced by real events once live)
-  setEvents(EXAMPLE);
+  // Served by the daemon: follow it live. Opened as a file: show the example.
+  if (/^https?:$/.test(location.protocol)) TOOLS.go_live();
+  else show(EXAMPLE, 'example session · load a transcript to replay it');
 </script>
 </body>
 </html>

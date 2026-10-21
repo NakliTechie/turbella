@@ -48,6 +48,7 @@ async function main() {
 
   // ---- clean fixture: 0 failures
   const clean = await readClaudeFile(FIX('claude-clean.jsonl'), 's-clean');
+  check('reader hashes 3 different tool inputs as 3 different sigs', new Set(clean.filter((e) => e.kind === KIND.TOOL).map((e) => e.sig)).size, 3);
   const ct = tally(clean);
   check('clean tool_fail count', ct[KIND.TOOL_FAIL] || 0, 0);
   check('clean tool ok count', ct[KIND.TOOL] || 0, 3);
@@ -122,6 +123,18 @@ async function main() {
   p.pause();
   p.tick(999999);
   check('paused does not advance', p.time, 1000);
+
+  // live mode: a player that starts empty takes appended events and follows them
+  const lp = createPlayer([]);
+  let appendThrew = false;
+  try {
+    lp.append([{ ts: 5000, kind: 'tool' }]);
+    lp.append([{ ts: 6000, kind: 'tool_fail' }]);
+    lp.seek(6000);
+  } catch { appendThrew = true; }
+  check('append to an empty player does not throw', appendThrew, false);
+  check('live player shows both appended events', lp.arrived, 2);
+  check('live player duration spans the appended events', lp.snapshot().duration, 1000);
 
   // ---- Batch B: live Claude Code adapter -----------------------------------
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -266,11 +279,45 @@ async function main() {
   check('status has sockPath', typeof status.sockPath === 'string', true);
 
   // emit with no daemon reachable must not throw
+  // replay through the CLI: counts only, from the shared reader
+  const rep = JSON.parse(execFileSync(process.execPath, [BIN, 'replay', FIX('claude-retry-loop.jsonl')], { encoding: 'utf8' }));
+  check('replay counts the fixture failures', rep.byKind.tool_fail, 2);
+  check('replay output carries no transcript text', /git push|rejected/i.test(JSON.stringify(rep)), false);
+
+  // the page's modules are served; nothing outside src/ is
+  const page = await fetch(`http://127.0.0.1:${cliPort}/`);
+  check('daemon serves the page', page.status, 200);
+  for (const m of ['manifest', 'playback', 'render', 'transcript', 'crypto', 'event']) {
+    const r = await fetch(`http://127.0.0.1:${cliPort}/src/${m}.js`);
+    check(`daemon serves src/${m}.js`, r.status, 200);
+  }
+  const climb = await fetch(`http://127.0.0.1:${cliPort}/src/%2e%2e/package.json`);
+  check('daemon refuses paths outside src/', climb.status, 404);
   await stop();
-  delete process.env.TURBELLA_SOCK;
+
+  // emit with no daemon running starts one instead of failing
+  process.env.TURBELLA_SOCK = '/tmp/turbella-emit.sock';
   let emitThrew = false;
   try { execFileSync(process.execPath, [BIN, 'emit', '--kind', 'tool'], { encoding: 'utf8' }); } catch { emitThrew = true; }
-  check('emit to dead daemon does not throw', emitThrew, false);
+  check('emit with no daemon does not throw', emitThrew, false);
+  const emitState = readState();
+  check('emit with no daemon starts one', emitState !== null, true);
+  if (emitState) { try { process.kill(emitState.pid); } catch {} await sleep(200); }
+  try { unlinkSync('/tmp/turbella-emit.sock'); } catch {}
+  delete process.env.TURBELLA_SOCK;
+
+  // ---- parity: every door matches the manifest ------------------------------
+  const { MANIFEST, toolsFor } = await import('../src/manifest.js');
+  const { HANDLERS } = await import('../src/tools.js');
+  const { readFileSync } = await import('node:fs');
+  const daemonNames = toolsFor('daemon').map((t) => t.name).sort();
+  check('every daemon tool has one CLI/MCP handler, and no extras', JSON.stringify(Object.keys(HANDLERS).sort()), JSON.stringify(daemonNames));
+  check('every manifest entry states personOnly', MANIFEST.every((t) => typeof t.personOnly === 'boolean'), true);
+  const html = readFileSync(join(here, '..', 'web', 'turbella.html'), 'utf8');
+  const controls = [...html.matchAll(/<(button|select|input)\b[^>]*>/g)].map((m) => m[0]);
+  check('every page control names its tool', controls.every((c) => /data-tool="/.test(c)), true);
+  const pageNames = [...new Set(controls.flatMap((c) => c.match(/data-tool="([^"]+)"/)[1].split(' ')))].sort();
+  check('page controls cover exactly the page tools', JSON.stringify(pageNames), JSON.stringify(toolsFor('page').map((t) => t.name).sort()));
 
   // ---- MCP server (stdio JSON-RPC) -----------------------------------------
   // Start a daemon so the MCP status tool/resource has data to return.
@@ -312,13 +359,15 @@ async function main() {
   check('mcp initialize serverInfo name', init.result.serverInfo.name, 'turbella');
 
   const tools = JSON.parse(await mcp.call('tools/list', {}, 2));
-  check('mcp tools/list has turbellla_status', tools.result.tools.some((t) => t.name === 'turbella_status'), true);
+  check('mcp tools/list matches the manifest', JSON.stringify(tools.result.tools.map((t) => t.name).sort()), JSON.stringify(daemonNames.map((n) => 'turbella_' + n)));
 
   const resList = JSON.parse(await mcp.call('resources/list', {}, 3));
-  check('mcp resources/list has turbellla://status', resList.result.resources.some((r) => r.uri === 'turbella://status'), true);
+  check('mcp resources/list has turbella://status', resList.result.resources.some((r) => r.uri === 'turbella://status'), true);
 
   const toolCall = JSON.parse(await mcp.call('tools/call', { name: 'turbella_status', arguments: {} }, 4));
   check('mcp tools/call returns status JSON', toolCall.result.content[0].text.includes('"events"'), true);
+  const replayCall = JSON.parse(await mcp.call('tools/call', { name: 'turbella_replay', arguments: { path: FIX('claude-retry-loop.jsonl') } }, 6));
+  check('mcp replay returns the same counts as the CLI', JSON.parse(replayCall.result.content[0].text).byKind.tool_fail, 2);
 
   const resRead = JSON.parse(await mcp.call('resources/read', { uri: 'turbella://status' }, 5));
   check('mcp resources/read returns status', resRead.result.contents[0].uri === 'turbella://status', true);
