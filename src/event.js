@@ -1,30 +1,19 @@
-// Neutral event record — the single shape every Turbella reader produces and
-// every consumer (canvas, gauge, daemon, emit) reads.
+// The event record: the one shape the readers, the hook, the daemon, the gauge
+// and the page share.
 //
-//   { ts, agent, session, kind, status, tool, dur_ms, sig }
+//   ts      epoch ms
+//   agent   source client, e.g. 'claude'
+//   session source session id
+//   kind    see KIND
+//   status  see STATUS
+//   tool    tool name, or null
+//   dur_ms  duration in ms, or null
+//   sig     sha256 of the tool arguments (tool) or the error text (tool_fail)
+//   target  sha256 of the file path an edit touched, or null
 //
-//   ts      epoch ms of the event
-//   agent   'claude' | 'codex' | ... (source client)
-//   session source session id (one stream of turns)
-//   kind    'tool' | 'tool_fail' | 'think' | 'permission' | 'notification'
-//          | 'subagent' | 'stop' | 'error'
-//   status  'ok' | 'error' | 'waiting' | 'denied'
-//   tool    tool name (e.g. 'Bash', 'Write', 'task'); null for non-tool kinds
-//   dur_ms  duration in ms (tool call, think, wait); null when unknown
-//   sig     sha256 content hash of what names the event: tool input args for
-//           `tool`, error text for `tool_fail`. A hash, never raw content — the
-//           privacy rule (AGENTS.md): never file contents, prompts, tool output
-//           or thinking text.
-//
-// Sig mirrors the NakliOS ledger convention (input_hash / output_hash committed
-// by hash): the payload is canonical (sorted-key) JSON, hashed with SHA-256.
+// Only hashes, never text: no file contents, prompts, tool output or thinking.
 
-import { contentHash, truncate } from './crypto.js';
-
-// Tracesens-parity caps, reused verbatim so Turbella's sig matches what tracelens
-// would extract from the same transcript.
-export const INPUT_CAP = 4000;
-export const ERR_CAP = 1000;
+import { contentHash } from './crypto.js';
 
 export const KIND = Object.freeze({
   TOOL: 'tool',
@@ -44,29 +33,48 @@ export const STATUS = Object.freeze({
   DENIED: 'denied',
 });
 
-// Build one event. `sig` may be precomputed or left null; `payload` (tool input
-// args or error text) is hashed into `sig` asynchronously when provided. The
-// payload is truncated before hashing and never stored in the record.
-export async function makeEvent({
-  ts,
-  agent,
-  session,
-  kind,
-  status = STATUS.OK,
-  tool = null,
-  dur_ms = null,
-  sig = null,
-  payload = null,
-} = {}) {
-  if (sig === null && payload !== null) sig = await contentHash(payload);
-  return Object.freeze({
-    ts: ts ?? null,
-    agent: agent ?? null,
-    session: session ?? null,
-    kind,
-    status,
-    tool,
-    dur_ms: dur_ms ?? null,
-    sig,
-  });
+const KINDS = new Set(Object.values(KIND));
+const STATUSES = new Set(Object.values(STATUS));
+const HASH = /^sha256:[0-9a-f]{64}$/;
+const str = (v, max = 200) => (typeof v === 'string' && v.length <= max ? v : null);
+const num = (v) => (Number.isFinite(v) ? v : null);
+
+// Build an event from untrusted input, keeping only known fields with valid
+// values. Returns null when the kind is unknown.
+export function toEvent(raw) {
+  if (!raw || typeof raw !== 'object' || !KINDS.has(raw.kind)) return null;
+  return {
+    ts: num(raw.ts) ?? Date.now(),
+    agent: str(raw.agent, 40) ?? 'claude',
+    session: str(raw.session),
+    kind: raw.kind,
+    status: STATUSES.has(raw.status) ? raw.status : STATUS.OK,
+    tool: str(raw.tool, 120),
+    dur_ms: num(raw.dur_ms),
+    sig: HASH.test(raw.sig ?? '') ? raw.sig : null,
+    target: HASH.test(raw.target ?? '') ? raw.target : null,
+  };
+}
+
+// Hashes for one tool call, shared by the hook and the transcript reader so a
+// call hashes the same live and in replay. Bash's `description` is free text
+// the model rewrites on every call, so it is left out.
+export async function hashToolInput(input) {
+  let args = input;
+  if (args && typeof args === 'object' && !Array.isArray(args)) {
+    const { description, ...rest } = args;
+    args = rest;
+  }
+  const path = args?.file_path ?? args?.notebook_path;
+  return {
+    sig: args === undefined ? null : await contentHash(args),
+    target: typeof path === 'string' ? await contentHash(path) : null,
+  };
+}
+
+// Error text from a tool result: a string, or the text blocks of an array.
+export function errorText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return content.map((b) => (typeof b === 'string' ? b : b?.text ?? '')).join('\n');
+  return content == null ? '' : JSON.stringify(content);
 }

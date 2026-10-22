@@ -1,5 +1,5 @@
 // Time to first value, cold: from the first hook event with no daemon running
-// to that event drawn on the live page. Gate: 5 s (DOCTRINES rule 2).
+// to that event on the live page. Gate: 5 s.
 //
 // Run:  node scripts/ttfv.mjs        exit 0 within the gate, 1 over it or on error
 //
@@ -11,10 +11,11 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { launchChrome } from './chrome.mjs';
 
 const GATE_MS = 5000;
-const here = new URL('.', import.meta.url).pathname;
+const here = fileURLToPath(new URL('.', import.meta.url));
 const HOOK = join(here, '..', 'bin', 'turbella-hook');
 const SOCK = `/tmp/tb-ttfv-${process.pid}.sock`; // macOS caps socket paths at 104 chars
 const env = { ...process.env, TURBELLA_SOCK: SOCK, TURBELLA_PORT: '0' };

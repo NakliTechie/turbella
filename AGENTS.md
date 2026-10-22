@@ -1,18 +1,38 @@
-# Turbella: rules for agents
+# Turbella: notes for coding agents and contributors
 
-Tier: Tool. Read `README.md` for what this is and `plan/pending.md` for what is next.
+Turbella is a Claude Code plugin, a local Node daemon and a browser page that
+shows an agent's tool calls, failures, permission waits and thinking as they
+happen, with a gauge for when the agent is stuck. `README.md` covers use.
 
-## Verification budget
+## Layout
 
-1. No tests, evals or diagnostics between implementation steps. Build the whole batch, then check it once at the batch boundary. A batch is one capability family, about a day of work, and closes early past that.
-2. Run only the checks that cover the changed batch. Never repeat an unchanged suite.
-3. All generated test data goes to one temporary directory, capped at 5,000 files and 500 MB by default, preferring one aggregate file to many, and deleted on success, failure and interrupt.
-4. One diagnostic batch per failure. Write a new hypothesis before any new diagnostic script.
-5. No new process tooling (receipts, provenance, locks) until a feature it gates exists.
-6. Log anything over 50 MB or 1,000 files to the session ledger when it is created, so `/tidy-nt` can clear it.
+- `hooks/hooks.json`, `.claude-plugin/` — the plugin: which Claude Code hooks run.
+- `bin/turbella-hook` — runs per hook; hashes what names the call and sends one event.
+- `bin/turbella` — the CLI; `bin/turbella-mcp` — the same tools over MCP (stdio).
+- `src/daemon.js` — receives events on a Unix socket; serves the page and its stream on 127.0.0.1.
+- `src/event.js` — the event record and the only place events are built from input.
+- `src/transcript.js`, `src/reader.js` — Claude Code transcripts to events, for replay.
+- `src/gauge.js` — the turbulence gauge; `src/tailer.js` — thinking time from live transcripts.
+- `src/manifest.js` — every command, declared once; `src/tools.js` — their handlers.
+- `web/turbella.html`, `src/render.js`, `src/playback.js` — the page.
 
-## Privacy rules for this project
+## Rules
 
-- Events carry tool names, durations, statuses and hashes of arguments or error text. They never carry file contents, prompts, tool output or thinking text unless a flag turns that on.
-- The daemon listens on localhost or a Unix socket only.
-- Transcripts hold secrets. Test fixtures are synthetic.
+- **Privacy.** Events carry tool names, statuses, durations and SHA-256 hashes. Never put
+  file contents, prompts, tool output, error text or thinking text in an event, and never
+  send them out of the hook. `npm run verify` checks this with a stand-in socket.
+- **Local only.** The daemon listens on a Unix socket and on 127.0.0.1, and answers only
+  requests addressed to this machine. No network calls, no telemetry, no accounts.
+- **One manifest.** A new command goes in `src/manifest.js` with a handler in
+  `src/tools.js` (CLI and MCP) or in the page's `TOOLS` table, plus a `data-tool`
+  attribute on its control. `npm run verify` fails when they drift.
+- **No dependencies.** Node 22 built-ins only.
+- **Fixtures are synthetic** and use Claude Code's real record shape. Real transcripts
+  hold secrets; never commit one.
+
+## Before you commit
+
+```
+npm run verify     # all checks, about 10 s
+npm run ttfv       # needs Chrome; first hook to event on the page, gate 5 s
+```

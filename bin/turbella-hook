@@ -1,45 +1,50 @@
 #!/usr/bin/env node
-// Hook shim: reads one Claude Code hook payload from stdin and forwards a
-// single JSON-line envelope to the Turbella daemon's Unix socket, starting
-// the daemon if none is running.
+// Claude Code hook: reads one hook payload from stdin, hashes what names the
+// call, and sends the daemon an event with hashes only. Starts the daemon if
+// none runs. File bodies, prompts, tool output and notification text never
+// leave this process.
 //
-// Never fails loudly: every error is swallowed and the exit code is always 0.
-// Delivery is awaited (an early exit dropped every event) but capped, and
-// Claude Code runs these hooks async, so a tool call never waits on it.
-//
-// SessionStart runs synchronously instead: it makes sure the daemon is up and
-// tells the person where the page is.
+// Never fails loudly: errors are swallowed and the exit code is always 0. The
+// hooks run async (hooks/hooks.json), so a tool call never waits on this.
+// SessionStart runs synchronously instead: it starts the daemon and prints the
+// page address for the person.
 import { deliver } from '../src/socketWrite.js';
+import { readState } from '../src/paths.js';
+import { contentHash } from '../src/crypto.js';
+import { hashToolInput, errorText } from '../src/event.js';
 
 const HARD_EXIT_MS = 2500;
+const MAX_STDIN = 16 * 1024 * 1024;
 setTimeout(() => process.exit(0), HARD_EXIT_MS).unref();
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let stdin = '';
-process.stdin.on('data', (c) => { stdin += c; });
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (c) => { stdin += c; if (stdin.length > MAX_STDIN) process.exit(0); });
 process.stdin.on('error', () => process.exit(0));
 process.stdin.on('end', async () => {
   try {
-    // Keep only what the daemon hashes or labels. Tool output, notification
-    // text and everything else stay in this process.
-    const { hook_event_name, session_id, tool_name, tool_input, error, error_message } = JSON.parse(stdin || '{}');
-    const payload = { hook_event_name, session_id, tool_name, tool_input, error, error_message };
-    const envelope = {
-      type: payload.hook_event_name ?? 'unknown',
-      session: payload.session_id ?? null,
-      ts: Date.now(),
-      agent: 'claude',
-      payload,
-    };
-    if (envelope.type === 'SessionStart') {
-      await deliver({ kind: 'ping' });
-      const { readState } = await import('../src/daemon.js');
-      // The socket opens before the page server, so the address can lag a moment.
+    const p = JSON.parse(stdin || '{}');
+    const transcript = typeof p.transcript_path === 'string' ? p.transcript_path : null;
+    if (p.hook_event_name === 'SessionStart') {
+      await deliver({ kind: 'ping', transcript, session: p.session_id ?? null });
       let st = readState();
-      for (let i = 0; !st && i < 10; i++) { await new Promise((r) => setTimeout(r, 100)); st = readState(); }
+      for (let i = 0; !st && i < 10; i++) { await sleep(100); st = readState(); }
       if (st) process.stdout.write(JSON.stringify({ systemMessage: `Turbella: http://127.0.0.1:${st.port}` }));
     } else {
-      await deliver(envelope);
+      const failed = p.hook_event_name === 'PostToolUseFailure';
+      const { sig, target } = failed
+        ? { sig: await contentHash(errorText(p.error ?? p.error_message)), target: null }
+        : await hashToolInput(p.tool_input);
+      await deliver({
+        type: p.hook_event_name ?? 'unknown',
+        session: p.session_id ?? null,
+        ts: Date.now(),
+        agent: 'claude',
+        tool: typeof p.tool_name === 'string' ? p.tool_name : null,
+        sig, target, transcript,
+      });
     }
-  } catch { /* swallow: never fail loudly */ }
+  } catch { /* never fail loudly */ }
   process.exit(0);
 });

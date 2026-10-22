@@ -2,7 +2,7 @@
   "name": "turbella",
   "version": "0.1.0",
   "private": true,
-  "description": "A Winamp-style visualiser for the long waits in an agent turn. Standalone plugin + daemon; Claude Code, Codex, opencode and ACP feed it.",
+  "description": "See what your coding agent is doing while you wait: tool calls, failures, permission waits and thinking, live, with a gauge for when it is stuck. Claude Code plugin.",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -14,5 +14,9 @@
     "verify": "node scripts/verify.mjs",
     "ttfv": "node scripts/ttfv.mjs"
   },
-  "license": "UNLICENSED"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NakliTechie/turbella"
+  }
 }

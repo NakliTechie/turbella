@@ -80,6 +80,11 @@ async function handleLine(stdout, line) {
   try {
     req = JSON.parse(line);
   } catch {
+    stdout.write(jsonRpcError(null, -32700, 'Parse error') + '\n');
+    return;
+  }
+  if (!req || typeof req !== 'object' || Array.isArray(req)) {
+    stdout.write(jsonRpcError(null, -32600, 'Invalid Request') + '\n');
     return;
   }
   const { id, method, params } = req;

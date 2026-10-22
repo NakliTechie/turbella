@@ -10,9 +10,10 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { launchChrome } from '../scripts/chrome.mjs';
 
-const here = new URL('.', import.meta.url).pathname;
+const here = fileURLToPath(new URL('.', import.meta.url));
 const HOOK = join(here, '..', 'bin', 'turbella-hook');
 const SOCK = `/tmp/tb-capture-${process.pid}.sock`;
 const env = { ...process.env, TURBELLA_SOCK: SOCK, TURBELLA_PORT: '0' };

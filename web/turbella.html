@@ -70,7 +70,7 @@
   </div>
 </main>
 <footer>
-  <span>red spike = failed tool · amber = permission wait · violet pulse = thinking · loop glyph = stuck on repeat</span>
+  <span>red spike = failed tool · amber = permission wait · violet dot = thinking (bigger = longer) · loop glyph = stuck on repeat</span>
 </footer>
 
 <script type="module">
@@ -105,7 +105,10 @@
   let player = createPlayer([]);
   let allEvents = [];
   let raf = null;
-  let live = null; // EventSource while following the daemon
+  let live = null;     // EventSource while connected to the daemon
+  let follow = false;  // the playhead tracks the newest live event
+  const SPEEDS = toolsFor('page').find((t) => t.name === 'set_speed').inputSchema.properties.speed.enum;
+  const following = () => !!live && follow;
 
   const t0 = () => allEvents[0]?.ts ?? 0;
   const span = () => (allEvents[allEvents.length - 1]?.ts ?? t0()) - t0();
@@ -123,15 +126,15 @@
     scrub.value = Math.round((snap.progress || 0) * 100);
     overlayTime.textContent = formatMs(snap.time - t0()) + ' / ' + formatMs(span());
     btnPlay.textContent = player.playing ? '⏸ Pause' : '▶ Play';
-    btnLive.classList.toggle('active', !!live);
-    // Live: measured against the wall clock, so a silent wait raises it.
-    const g = snap.eventsSoFar.length ? gaugeSnapshot(snap.eventsSoFar, { now: live ? Date.now() : snap.time }) : 0;
+    btnLive.classList.toggle('active', following());
+    // Following live: measured against the wall clock, so a silent wait raises it.
+    const g = snap.eventsSoFar.length ? gaugeSnapshot(snap.eventsSoFar, { now: following() ? Date.now() : snap.time }) : 0;
     gaugeValue.textContent = g.toFixed(2);
     gaugeFill.style.width = `${Math.round(g * 100)}%`;
     gaugeFill.style.background = g >= 0.5 ? 'var(--bad)' : g >= 0.25 ? 'var(--warn)' : 'var(--accent)';
   }
   // Redraw once a second while live, so the gauge moves during a silent wait.
-  setInterval(() => { if (live) draw(); }, 1000);
+  setInterval(() => { if (following()) draw(); }, 1000);
 
   function loop() {
     const s = player.tick(performance.now());
@@ -142,6 +145,7 @@
 
   function stopLive() {
     if (live) { live.close(); live = null; }
+    follow = false;
   }
 
   function show(events, label) {
@@ -159,6 +163,7 @@
   async function toEvents(input) {
     if (Array.isArray(input)) return input;
     const text = String(input);
+    try { const all = JSON.parse(text); if (Array.isArray(all)) return all; } catch {}
     const lines = text.split(/\r?\n/);
     const first = lines.find((l) => l.trim());
     try { if (first && JSON.parse(first).kind) return lines.filter((l) => l.trim()).map((l) => JSON.parse(l)); } catch {}
@@ -172,24 +177,27 @@
   const TOOLS = {
     play() {
       if (!allEvents.length) return { playing: false };
+      follow = false;
       if (player.progress >= 1) player.seek(t0());
       player.play();
       if (!raf) loop();
       return { playing: true };
     },
     pause() {
+      follow = false;
       player.pause();
       draw();
       return { playing: false };
     },
     set_speed({ speed }) {
-      const was = player.playing;
-      player.setSpeed(Number(speed));
-      if (!was) player.pause();
-      selSpeed.value = String(speed);
+      const v = Number(speed);
+      if (!SPEEDS.includes(v)) throw new Error(`speed must be one of ${SPEEDS.join(', ')}`);
+      player.setSpeed(v);
+      selSpeed.value = String(v);
       return { speed: player.speed };
     },
     seek({ fraction }) {
+      follow = false;
       const f = Math.min(Math.max(Number(fraction) || 0, 0), 1);
       player.seek(t0() + f * span());
       draw();
@@ -202,7 +210,13 @@
       return { events: evs.length };
     },
     go_live() {
-      if (live) return { live: true };
+      if (live) {
+        follow = true;
+        if (allEvents.length) player.seek(allEvents[allEvents.length - 1].ts);
+        draw();
+        return { live: true };
+      }
+      follow = true;
       show([], 'live · waiting for events…');
       live = new EventSource('/events');
       live.onmessage = (e) => {
@@ -210,7 +224,7 @@
         try { ev = JSON.parse(e.data); } catch { return; }
         allEvents.push(ev);
         player.append([ev]);
-        player.seek(ev.ts); // follow the newest event
+        if (follow) player.seek(ev.ts);
         status.textContent = `${allEvents.length} events · live`;
         draw();
       };

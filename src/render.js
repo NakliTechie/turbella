@@ -1,18 +1,15 @@
 // Canvas renderer for the Turbella replay page. Browser-only (DOM + Canvas).
 //
-// Draws one horizontal lane per agent. X axis is time. As the playhead moves,
+// Draws one horizontal lane per agent and session. X axis is time. As the playhead moves,
 // events "arrive" and are painted as marks:
 //
 //   - tool        : small tick, hue by tool kind (Bash / Write / Read / …)
 //   - tool_fail   : red spike  (failure)
 //   - permission  : amber tick (permission wait)
-//   - think       : soft violet pulse whose radius grows with thinking time
+//   - think       : violet dot whose size grows with thinking time
 //   - stop / notification / subagent : small distinct marks
 //
-// A loop glyph (curved arrow) appears above a lane when the same `sig`
-// repeats within the recent window — the "stuck on repeat" signal.
-
-import { createPlayer } from './playback.js';
+// A loop glyph marks a failure whose `sig` already failed in the last minute.
 
 // ---- palette (honest visuals; nothing decorative beyond the signal) ---------
 
@@ -66,12 +63,23 @@ function loopSig(eventsSoFar, event, windowMs = 60 * 1000) {
   return n >= 2;
 }
 
+// Lane key: the agent, plus the session when there is one, so two concurrent
+// sessions of one agent draw on two lanes.
+function laneOf(e) {
+  return e.session ? `${e.agent} ${String(e.session).slice(0, 6)}` : (e.agent ?? '?');
+}
+
+function formatSpan(ms) {
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
 export function createRenderer(canvas, opts = {}) {
   const ctx = canvas.getContext('2d');
   const lanePad = opts.lanePad ?? 24;
   const topPad = opts.topPad ?? 40;
   const bottomPad = opts.bottomPad ?? 34;
-  const sidePad = opts.sidePad ?? 60;
+  const sidePad = opts.sidePad ?? 110;
 
   let agents = [];
   let eventsSoFar = [];
@@ -105,12 +113,7 @@ export function createRenderer(canvas, opts = {}) {
   function feed({ eventsSoFar: es, time }, allEvents) {
     eventsSoFar = es;
     playhead = time;
-    const seen = [];
-    const set = new Set();
-    for (const e of allEvents) {
-      if (e.agent && !set.has(e.agent)) { set.add(e.agent); seen.push(e.agent); }
-    }
-    agents = seen;
+    agents = [...new Set(allEvents.map(laneOf))];
     const ts = allEvents.map((e) => e.ts).filter((t) => t != null);
     tMin = ts.length ? Math.min(...ts) : 0;
     tMax = ts.length ? Math.max(...ts) : tMin + 1;
@@ -140,7 +143,7 @@ export function createRenderer(canvas, opts = {}) {
     const tickCount = 5;
     for (let i = 0; i <= tickCount; i++) {
       const tx = xFor(tMin + (i / tickCount) * (tMax - tMin));
-      ctx.fillText(Math.round((tx - sidePad) / (width - 2 * sidePad) * 100) + '%', tx, topPad - 8);
+      ctx.fillText(formatSpan((i / tickCount) * (tMax - tMin)), tx, topPad - 8);
     }
 
     // agent lane labels (left) + separators
@@ -160,10 +163,9 @@ export function createRenderer(canvas, opts = {}) {
     }
 
     // draw arrived events
-    const now = performance.now();
     for (const e of eventsSoFar) {
       const cx = xFor(e.ts);
-      const cy = laneY(e.agent);
+      const cy = laneY(laneOf(e));
       const c = colorFor(e);
 
       if (e.kind === 'tool_fail') {
@@ -186,14 +188,10 @@ export function createRenderer(canvas, opts = {}) {
           ctx.stroke();
         }
       } else if (e.kind === 'think') {
-        // soft pulse: radius grows with thinking time, fades with age
-        const dur = e.dur_ms ?? 400;
-        const age = now - e.ts;
-        const phase = (age % 1200) / 1200;
-        const r = 6 + (dur / 200) * (1 + Math.sin(phase * Math.PI)) * 1.5;
-        const alpha = Math.max(0, 1 - age / 3000);
+        // radius grows with thinking time, capped at 20 s
+        const r = 4 + Math.min(e.dur_ms ?? 0, 20_000) / 20_000 * 14;
         ctx.fillStyle = c;
-        ctx.globalAlpha = alpha * 0.45;
+        ctx.globalAlpha = 0.4;
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, 2 * Math.PI);
         ctx.fill();
@@ -241,5 +239,4 @@ export function createRenderer(canvas, opts = {}) {
   return { resize, feed, draw };
 }
 
-export { colorFor, KIND };
 

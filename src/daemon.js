@@ -1,23 +1,23 @@
-// Turbella daemon: Unix socket in, HTTP page out, idle exit.
+// Turbella daemon: events in on a Unix socket, the page and its event stream
+// out on 127.0.0.1, exit when idle.
 //
-//   socket in : hook binaries write one JSON line per event to the Unix socket
-//   http out  : serves the replay canvas page on localhost + SSE /events stream
-//   idle exit : shuts down after TURBELLA_IDLE_MS with no activity
-//
-// Localhost / Unix socket only — no network (AGENTS.md privacy rule). Events
-// carry hashes, never raw content.
+// Input is untrusted: every event is rebuilt from an allowlist (event.js), bad
+// lines are dropped, and memory is bounded. HTTP answers only requests
+// addressed to this machine, which stops DNS-rebinding pages from reading it.
 
 import { createServer as createNetServer, createConnection } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
-import { readFile, writeFile } from 'node:fs/promises';
-import { unlinkSync, writeFileSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { readFile } from 'node:fs/promises';
+import { chmodSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { contentHash, stable, truncate } from './crypto.js';
 import { gaugeSnapshot } from './gauge.js';
+import { toEvent } from './event.js';
+import { sockPath, stateFile, readState } from './paths.js';
+import { createTailer } from './tailer.js';
 
-// Hook event type -> neutral kind/status.
+export { readState };
+
 const HOOK_MAP = {
   PreToolUse: { kind: 'tool', status: 'waiting' },
   PostToolUse: { kind: 'tool', status: 'ok' },
@@ -32,168 +32,139 @@ const HOOK_MAP = {
   PreCompact: { kind: 'stop', status: 'ok' },
 };
 
-// Normalize a Claude Code hook envelope into a neutral event. Hooks forward
-// raw payloads; the daemon computes `sig` (a content hash, never raw text)
-// and the neutral shape so the canvas and gauge consume one format.
-async function normalizeHook(env) {
-  const m = HOOK_MAP[env.type] || { kind: 'tool', status: 'ok' };
-  const p = env.payload || {};
-  const tool = p.tool_name ?? p.tool ?? null;
-  let sig = null;
-  let payload = null;
-  if (env.type === 'PostToolUseFailure') {
-    payload = String(p.error_message ?? p.error ?? '');
-    sig = await contentHash(truncate(payload, 1000));
-  } else if (tool && (p.tool_input || p.input || p.arguments)) {
-    payload = p.tool_input ?? p.input ?? p.arguments;
-    // The model rewrites `description` on every call; drop it so repeats match.
-    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-      const { description, ...rest } = payload;
-      payload = rest;
-    }
-    // Hash canonical JSON: truncate() on an object yields "[object Object]".
-    sig = await contentHash(truncate(stable(payload), 4000));
-  }
-  return {
-    ts: env.ts ?? Date.now(),
-    agent: env.agent ?? 'claude',
-    session: env.session ?? null,
-    kind: m.kind,
-    status: m.status,
-    tool,
-    dur_ms: null,
-    sig,
-  };
-}
-
-const __dirname = join(fileURLToPath(import.meta.url), '..');
-const WEB = join(__dirname, '..', 'web');
-
-// The state file sits beside the socket, so a test daemon never overwrites
-// the real daemon's address.
-function stateFile() {
-  return process.env.TURBELLA_SOCK ? `${process.env.TURBELLA_SOCK}.state` : join(homedir(), '.turbella.state');
-}
-// A fixed default port keeps the page URL stable across daemon restarts; when
-// it is taken the OS picks a free one and the state file records it.
-const PORT = Number(process.env.TURBELLA_PORT || 7377);
+const SRC = fileURLToPath(new URL('.', import.meta.url));
+const WEB = join(SRC, '..', 'web');
+// A fixed default port keeps the page URL stable; when taken, the OS picks one.
+const PORT = Number(process.env.TURBELLA_PORT ?? 7377);
 const IDLE_DEFAULT_MS = 10 * 60_000;
+const MAX_EVENTS = 10_000;     // newest kept; the gauge looks at 5 minutes
+const MAX_CLIENTS = 16;
+const MAX_LINE = 1024 * 1024;
+const MAX_QUEUED = 1024 * 1024; // bytes a slow page may fall behind before it is dropped
+const OWNER_CHECK_MS = 5000;
 
-function sockPath() {
-  return process.env.TURBELLA_SOCK || join(homedir(), '.turbella.sock');
-}
-
-let events = [];       // in-memory buffer of neutral events
-let lastActivity = Date.now();
-let clients = new Set(); // SSE response writers
+let events = [];   // { id, ev }
+let nextId = 1;
+let totals = { events: 0, byKind: {} };
+const clients = new Set();
+const sockConns = new Set();
 let sockServer = null;
 let httpServer = null;
 let idleTimer = null;
-const sockConns = new Set(); // open Unix-socket connections, cut on stop
+let ownerTimer = null;
+let port = null;
+const tailer = createTailer({ onEvent: (raw) => push(toEvent(raw)) });
 
-function touch() {
-  lastActivity = Date.now();
-  resetIdle();
-}
 function resetIdle() {
   if (idleTimer) clearTimeout(idleTimer);
   const idleMs = Number(process.env.TURBELLA_IDLE_MS || IDLE_DEFAULT_MS);
   // An open page keeps the daemon alive: the long waits are what it shows.
   idleTimer = setTimeout(() => (clients.size ? resetIdle() : stop()), idleMs);
 }
-function broadcast(ev) {
-  const line = 'data: ' + JSON.stringify(ev) + '\n\n';
-  for (const c of clients) {
-    try { c.write(line); } catch { clients.delete(c); }
+
+function send(res, id, ev) {
+  if (!res.write(`id: ${id}\ndata: ${JSON.stringify(ev)}\n\n`) && res.writableLength > MAX_QUEUED) {
+    clients.delete(res);
+    res.destroy();
   }
 }
 
-// ---- Unix socket input ------------------------------------------------------
+function push(ev) {
+  if (!ev) return;
+  const id = nextId++;
+  events.push({ id, ev });
+  if (events.length > MAX_EVENTS) events = events.slice(-MAX_EVENTS);
+  totals.events++;
+  totals.byKind[ev.kind] = (totals.byKind[ev.kind] || 0) + 1;
+  resetIdle();
+  for (const c of clients) send(c, id, ev);
+}
 
-async function pushEvent(raw) {
-  let ev;
-  try { ev = JSON.parse(raw); } catch { return; } // swallow malformed lines
-  if (ev?.kind === 'ping') { touch(); return; } // wake-up only, not an event
-  if (ev && ev.type) {
-    // Hook envelope -> neutral event (async content hash).
-    try { ev = await normalizeHook(ev); } catch { /* fall back to raw envelope */ }
+// One socket line: a hook envelope ({type, ...}), a plain event, or a ping.
+function receive(line) {
+  let raw;
+  try { raw = JSON.parse(line); } catch { return; }
+  if (!raw || typeof raw !== 'object') return;
+  if (typeof raw.transcript === 'string') tailer.follow(raw.transcript);
+  if (raw.kind === 'ping') { resetIdle(); return; }
+  if (typeof raw.type === 'string') {
+    const m = HOOK_MAP[raw.type];
+    if (!m) return;
+    push(toEvent({ ...raw, ...m }));
+    return;
   }
-  ev.ts = ev.ts ?? Date.now();
-  ev.agent = ev.agent ?? 'claude';
-  events.push(ev);
-  touch();
-  broadcast(ev);
+  push(toEvent(raw));
 }
 
 function handleSocket(socket) {
   sockConns.add(socket);
-  socket.on('close', () => sockConns.delete(socket));
+  socket.setEncoding('utf8');
   let buf = '';
-  let processing = Promise.resolve();
   socket.on('data', (chunk) => {
-    buf += chunk.toString();
+    buf += chunk;
     let idx;
     while ((idx = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, idx).trim();
+      const line = buf.slice(0, idx);
       buf = buf.slice(idx + 1);
-      if (!line) continue;
-      processing = processing.then(() => pushEvent(line));
+      try { receive(line); } catch { /* drop the line */ }
     }
+    if (buf.length > MAX_LINE) socket.destroy();
   });
-  socket.on('end', () => { try { socket.destroy(); } catch {} });
-  socket.on('error', () => { try { socket.destroy(); } catch {} });
+  socket.on('close', () => sockConns.delete(socket));
+  socket.on('error', () => socket.destroy());
 }
 
-// ---- HTTP output ------------------------------------------------------------
+function status() {
+  const recent = events.map((e) => e.ev);
+  return {
+    events: totals.events,
+    byKind: totals.byKind,
+    gauge: Math.round(gaugeSnapshot(recent, { now: Date.now() }) * 1000) / 1000,
+    sockPath: sockPath(),
+  };
+}
 
 async function handleHttp(req, res) {
-  const u = new URL(req.url || '/', `http://localhost`);
-  if (u.pathname === '/events') {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-    });
+  const host = req.headers.host;
+  if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    res.end('forbidden');
+    return;
+  }
+  const path = (req.url || '/').split('?')[0];
+  if (path === '/events') {
+    if (clients.size >= MAX_CLIENTS) { res.writeHead(503); res.end(); return; }
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     res.write(': hello\n\n');
+    // A reconnecting page sends the last id it saw and gets only what is newer.
+    // An id from an earlier daemon (larger than any here) gets everything.
+    const last = Number(req.headers['last-event-id']) || 0;
+    const from = last < nextId ? last : 0;
+    for (const { id, ev } of events) if (id > from) send(res, id, ev);
     clients.add(res);
-    req.on('close', () => { clients.delete(res); try { res.end(); } catch {} });
-    // backlog: everything buffered so far
-    for (const ev of events) {
-      try { res.write('data: ' + JSON.stringify(ev) + '\n\n'); } catch {}
-    }
-    touch();
+    req.on('close', () => clients.delete(res));
+    resetIdle();
     return;
   }
-  if (u.pathname === '/status') {
-    const byKind = {};
-    for (const ev of events) byKind[ev.kind] = (byKind[ev.kind] || 0) + 1;
-    const gauge = gaugeSnapshot(events, { now: Date.now() });
-    const body = JSON.stringify({
-      events: events.length,
-      byKind,
-      gauge: Math.round(gauge * 1000) / 1000,
-      sockPath: sockPath(),
-    });
+  if (path === '/status') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(body);
+    res.end(JSON.stringify(status()));
     return;
   }
-  if (u.pathname === '/' || u.pathname === '/index.html') {
-    const html = await readFile(join(WEB, 'turbella.html'), 'utf8');
+  if (path === '/' || path === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(html);
+    res.end(await readFile(join(WEB, 'turbella.html'), 'utf8'));
     return;
   }
-  // The page's ES modules. Only bare lowercase names under src/, so a request
-  // cannot climb out of the folder.
-  const mod = u.pathname.match(/^\/src\/([a-z]+\.js)$/);
+  // The page's modules: bare lowercase names under src/ only.
+  const mod = path.match(/^\/src\/([a-z]+\.js)$/);
   if (mod) {
     try {
-      const js = await readFile(join(__dirname, mod[1]), 'utf8');
+      const js = await readFile(join(SRC, mod[1]), 'utf8');
       res.writeHead(200, { 'Content-Type': 'text/javascript' });
       res.end(js);
       return;
-    } catch { /* fall through to 404 */ }
+    } catch { /* 404 below */ }
   }
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('not found');
@@ -204,65 +175,74 @@ export class AlreadyRunning extends Error {
   constructor(state) { super('turbella daemon already running'); this.state = state; }
 }
 
-function listenSocket(server, path) {
-  return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(path, () => { server.off('error', reject); resolve(); });
-  });
+const listen = (server, ...args) => new Promise((resolve, reject) => {
+  server.once('error', reject);
+  server.listen(...args, () => { server.off('error', reject); resolve(); });
+});
+
+// A connect that succeeds means a live daemon; a refusal means a stale file.
+const socketIsLive = (path) => new Promise((resolve) => {
+  const c = createConnection({ path });
+  c.once('connect', () => { c.destroy(); resolve(true); });
+  c.once('error', () => resolve(false));
+});
+
+function writeState(state) {
+  // Written to a temp file and renamed, so a reader never sees half a file and
+  // a planted symlink at the final path is replaced, not followed.
+  const tmp = `${stateFile()}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
+  renameSync(tmp, stateFile());
 }
 
-// A connect that succeeds means a live daemon; ECONNREFUSED means a stale file.
-function socketIsLive(path) {
-  return new Promise((resolve) => {
-    const c = createConnection({ path });
-    c.once('connect', () => { c.destroy(); resolve(true); });
-    c.once('error', () => resolve(false));
-  });
-}
-
-function listenHttp(server, port) {
-  return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => { server.off('error', reject); resolve(); });
-  });
-}
+const ownsFiles = () => readState()?.pid === process.pid;
 
 export async function start() {
   const path = sockPath();
   sockServer = createNetServer(handleSocket);
   try {
-    await listenSocket(sockServer, path);
+    await listen(sockServer, path);
   } catch (e) {
     if (e.code !== 'EADDRINUSE') throw e;
     if (await socketIsLive(path)) throw new AlreadyRunning(readState());
-    try { unlinkSync(path); } catch {}
-    await listenSocket(sockServer, path);
+    try { unlinkSync(path); } catch { /* another starter removed it first */ }
+    await listen(sockServer, path);
   }
-  httpServer = createHttpServer(handleHttp);
+  chmodSync(path, 0o600);
+  httpServer = createHttpServer((req, res) => {
+    handleHttp(req, res).catch(() => { try { res.writeHead(500); res.end(); } catch {} });
+  });
   try {
-    await listenHttp(httpServer, PORT);
+    await listen(httpServer, PORT, '127.0.0.1');
   } catch (e) {
     if (e.code !== 'EADDRINUSE' || PORT === 0) throw e;
-    await listenHttp(httpServer, 0);
+    await listen(httpServer, 0, '127.0.0.1');
   }
-  const port = httpServer.address().port;
-  writeFileSync(stateFile(), JSON.stringify({ sockPath: path, port, pid: process.pid }));
+  port = httpServer.address().port;
+  writeState({ sockPath: path, port, pid: process.pid });
+  // Two daemons can race over a stale socket; the one whose pid is not in the
+  // state file has lost and leaves quietly.
+  ownerTimer = setInterval(() => { if (!ownsFiles()) stop(); }, OWNER_CHECK_MS);
   resetIdle();
   return { sockPath: path, port };
 }
 
-// Shutdown is deterministic: the address files go first, so no client reads a
-// dead daemon's address, and open connections are cut instead of awaited, so a
-// lingering keep-alive connection cannot hold the daemon up.
+// Remove the address files only if they are this daemon's, then cut every
+// connection instead of waiting on it.
 export function stop() {
-  if (idleTimer) clearTimeout(idleTimer);
-  try { unlinkSync(sockPath()); } catch {}
-  try { unlinkSync(stateFile()); } catch {}
-  for (const c of clients) { try { c.end(); } catch {} }
+  clearTimeout(idleTimer);
+  clearInterval(ownerTimer);
+  tailer.stop();
+  if (ownsFiles()) {
+    try { unlinkSync(sockPath()); } catch {}
+    try { unlinkSync(stateFile()); } catch {}
+  }
+  for (const c of clients) c.destroy();
   clients.clear();
-  events = [];
-  for (const sock of sockConns) sock.destroy();
+  for (const s of sockConns) s.destroy();
   sockConns.clear();
+  events = [];
+  totals = { events: 0, byKind: {} };
   const http = httpServer;
   const net = sockServer;
   httpServer = null;
@@ -273,20 +253,11 @@ export function stop() {
   ]).then(() => {});
 }
 
-// Exposed for tests only.
+// For tests.
 export function __state() {
-  const byKind = {};
-  for (const ev of events) byKind[ev.kind] = (byKind[ev.kind] || 0) + 1;
-  return { events: events.length, clients: clients.size, byKind };
+  return { events: events.length, clients: clients.size, byKind: totals.byKind };
 }
-
 export function __clear() {
   events = [];
-}
-
-// Read the address the daemon published (port + sock path) for the CLI.
-export function readState() {
-  try {
-    return JSON.parse(readFileSync(stateFile(), 'utf8'));
-  } catch { return null; }
+  totals = { events: 0, byKind: {} };
 }

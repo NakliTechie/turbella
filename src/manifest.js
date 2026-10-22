@@ -62,13 +62,13 @@ export const MANIFEST = Object.freeze([
   },
   {
     name: 'pause', place: 'page', effect: 'view', personOnly: false,
-    description: 'Pause playback.', inputSchema: none,
+    description: 'Pause playback; in live mode, also stop following the newest event.', inputSchema: none,
   },
   {
     name: 'set_speed', place: 'page', effect: 'view', personOnly: false,
-    description: 'Set playback speed as transcript time per real time (0.25, 1, 2, 5 or 10).',
+    description: 'Set playback speed as transcript time per real time.',
     inputSchema: {
-      type: 'object', properties: { speed: { type: 'number', minimum: 0 } },
+      type: 'object', properties: { speed: { type: 'number', enum: [0.25, 1, 2, 5, 10] } },
       required: ['speed'], additionalProperties: false,
     },
   },
@@ -90,7 +90,7 @@ export const MANIFEST = Object.freeze([
   },
   {
     name: 'go_live', place: 'page', effect: 'view', personOnly: false,
-    description: 'Follow the daemon live: clear the shown events and draw each new event as it arrives.',
+    description: 'Follow the daemon live: show its events and keep the playhead on the newest. Pause, play or seek to stop following.',
     inputSchema: none,
   },
 ]);

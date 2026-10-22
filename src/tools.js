@@ -5,7 +5,7 @@
 // result, or throws an Error whose message is fit to show.
 
 import { spawn } from 'node:child_process';
-import { readState } from './daemon.js';
+import { readState } from './paths.js';
 import { deliver } from './socketWrite.js';
 import { contentHash } from './crypto.js';
 import { readClaudeFile } from './reader.js';
@@ -21,9 +21,16 @@ async function waitForState(tries = 10) {
   return st;
 }
 
+// Make sure a daemon runs and return its address.
+async function ensureDaemon() {
+  await deliver({ kind: 'ping' });
+  const st = await waitForState();
+  if (!st) throw new Error('daemon did not start');
+  return st;
+}
+
 async function status() {
-  const st = readState();
-  if (!st) throw new Error('daemon not running (no state file)');
+  const st = await ensureDaemon();
   const res = await fetch(`http://127.0.0.1:${st.port}/status`, { signal: AbortSignal.timeout(5000) });
   return res.json();
 }
@@ -41,7 +48,7 @@ async function emit({ kind = 'tool', status: evStatus = 'ok', tool = null, sessi
 
 async function replay({ path }) {
   if (!path) throw new Error('replay needs a transcript path');
-  const events = await readClaudeFile(path);
+  const events = (await readClaudeFile(path)).filter((e) => e.status !== 'waiting');
   const byKind = {};
   for (const ev of events) byKind[ev.kind] = (byKind[ev.kind] || 0) + 1;
   const last = events.length ? events[events.length - 1].ts : Date.now();
@@ -54,13 +61,15 @@ async function replay({ path }) {
 }
 
 async function open() {
-  await deliver({ kind: 'ping' });
-  const st = await waitForState();
-  if (!st) throw new Error('daemon did not start');
-  const url = `http://127.0.0.1:${st.port}`;
+  const url = `http://127.0.0.1:${(await ensureDaemon()).port}`;
   const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
-  spawn(opener, [url], { stdio: 'ignore', detached: true }).unref();
-  return { url };
+  // Report a missing opener instead of crashing; the URL is still returned.
+  const opened = await new Promise((resolve) => {
+    const child = spawn(opener, [url], { stdio: 'ignore', detached: true });
+    child.once('error', () => resolve(false));
+    child.once('spawn', () => { child.unref(); resolve(true); });
+  });
+  return { url, opened };
 }
 
 export const HANDLERS = Object.freeze({ status, emit, replay, open });

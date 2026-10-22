@@ -1,122 +1,69 @@
-// Transcript tailer: watches Claude Code (`~/.claude/projects/*/*.jsonl`) and
-// Codex (`~/.codex/sessions/`) transcript trees for new lines. When it sees an
-// assistant turn carrying `thinkingDurationMs`, it emits a `think` event to the
-// caller's callback — the transcript lags the live turn, so the tailer
-// backfills the thinking heartbeat hooks can't see.
-//
-// Never blocks or fails loudly: missing/moved files are skipped, callback
-// errors are swallowed, and polling stops when stopped.
-//
-// Usage:
-//   import { createTailer } from './tailer.js';
-//   const t = createTailer({ onEvent: (ev) => writeEvent(ev), pollMs: 1000 });
-//   t.start();  // ... later ... t.stop();
+// Follows the transcripts of live sessions for thinking time, which no hook
+// reports. The daemon calls follow() with the transcript path each hook sends;
+// reading starts at the file's current end, so history is never replayed.
+// Only the duration is read, never the thinking text.
 
-import { readdir, stat, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { open, stat } from 'node:fs/promises';
 
-const CLAUDE_SRC =
-  process.env.TRACELESS_CLAUDE_SRC ||
-  (process.env.HOME ? `${process.env.HOME}/.claude/projects` : '');
-const CODEX_SRC =
-  process.env.TRACELESS_CODEX_SRC ||
-  (process.env.HOME ? `${process.env.HOME}/.codex/sessions` : '');
+const MAX_FILES = 32;
+const MAX_READ = 4 * 1024 * 1024;
 
-// File cursor: path -> last byte offset read.
-const cursors = new Map();
-let timer = null;
-let running = false;
-let onEvent = () => {};
+export function createTailer({ onEvent, pollMs = 1000 }) {
+  const files = new Map(); // path -> { offset, partial }
+  let timer = null;
 
-// Read new complete lines from a file since last offset.
-async function readNewLines(filePath) {
-  let offset = cursors.get(filePath) || 0;
-  let st;
-  try { st = await stat(filePath); } catch { return []; }
-  if (st.size < offset) { offset = 0; cursors.set(filePath, 0); } // rotated
-  if (st.size === offset) return [];
-  const data = await readFile(filePath, { encoding: 'utf8', start: offset });
-  const lines = data.split(/\r?\n/);
-  const complete = lines.slice(0, -1); // last element may be a partial line
-  const consumed = data.lastIndexOf('\n');
-  cursors.set(filePath, offset + (consumed >= 0 ? consumed + 1 : 0));
-  return complete.filter(Boolean);
-}
-
-// Scan one transcript file for think events.
-async function scanFile(filePath, agent) {
-  const lines = await readNewLines(filePath);
-  for (const line of lines) {
-    let msg;
-    try { msg = JSON.parse(line); } catch { continue; }
-    if (msg.type === 'assistant' && msg.message &&
-        typeof msg.message.thinkingDurationMs === 'number') {
-      try {
+  async function readNew(path, f) {
+    let st;
+    try { st = await stat(path); } catch { files.delete(path); return; }
+    if (st.size < f.offset) { f.offset = 0; f.partial = ''; } // truncated or replaced
+    if (st.size === f.offset) return;
+    const len = Math.min(st.size - f.offset, MAX_READ);
+    const fh = await open(path, 'r');
+    try {
+      const buf = Buffer.alloc(len);
+      await fh.read(buf, 0, len, f.offset);
+      f.offset += len;
+      const lines = (f.partial + buf.toString('utf8')).split('\n');
+      f.partial = lines.pop();
+      for (const line of lines) {
+        if (!line.includes('"thinkingDurationMs"')) continue;
+        let rec;
+        try { rec = JSON.parse(line); } catch { continue; }
+        if (rec.type !== 'assistant' || typeof rec.thinkingDurationMs !== 'number') continue;
         onEvent({
-          ts: msg.timestamp ? Date.parse(msg.timestamp) : Date.now(),
-          agent,
-          session: msg.sessionId ?? null,
+          ts: rec.timestamp ? Date.parse(rec.timestamp) : Date.now(),
+          agent: rec.isSidechain ? 'subagent' : 'claude',
+          session: rec.sessionId ?? null,
           kind: 'think',
           status: 'ok',
-          tool: null,
-          dur_ms: msg.message.thinkingDurationMs,
-          sig: 'sha256:think-' + msg.message.thinkingDurationMs,
+          dur_ms: rec.thinkingDurationMs,
         });
-      } catch {} // never fail loudly
-    }
-  }
-}
-
-// Discover .jsonl transcript files under a root (one level of subdirs).
-async function discover(root) {
-  const out = [];
-  try {
-    const entries = await readdir(root, { withFileTypes: true });
-    for (const e of entries) {
-      const full = join(root, e.name);
-      if (e.isDirectory()) {
-        try {
-          const sub = await readdir(full, { withFileTypes: true });
-          for (const s of sub)
-            if (s.isFile() && s.name.endsWith('.jsonl')) out.push(join(full, s.name));
-        } catch {}
-      } else if (e.isFile() && e.name.endsWith('.jsonl')) {
-        out.push(full);
       }
+    } finally {
+      await fh.close();
     }
-  } catch {}
-  return out;
-}
-
-let knownFiles = new Map(); // path -> agent
-
-async function refreshFiles() {
-  for (const f of await discover(CLAUDE_SRC)) knownFiles.set(f, 'claude');
-  for (const f of await discover(CODEX_SRC)) if (!knownFiles.has(f)) knownFiles.set(f, 'codex');
-}
-
-async function poll() {
-  await refreshFiles();
-  for (const [filePath, agent] of knownFiles) {
-    try { await scanFile(filePath, agent); } catch {}
   }
-}
 
-export function createTailer(opts = {}) {
-  const pollMs = opts.pollMs ?? 2000;
-  onEvent = opts.onEvent || (() => {});
+  async function poll() {
+    for (const [path, f] of files) {
+      try { await readNew(path, f); } catch { /* skip this round */ }
+    }
+  }
+
   return {
-    start() {
-      if (running) return;
-      running = true;
-      refreshFiles();
-      poll();
-      timer = setInterval(poll, pollMs);
+    async follow(path) {
+      if (typeof path !== 'string' || !path.endsWith('.jsonl') || files.has(path)) return;
+      let st;
+      try { st = await stat(path); } catch { return; }
+      if (!st.isFile()) return;
+      if (files.size >= MAX_FILES) files.delete(files.keys().next().value);
+      files.set(path, { offset: st.size, partial: '' });
+      if (!timer) timer = setInterval(poll, pollMs);
     },
     stop() {
-      running = false;
       if (timer) clearInterval(timer);
       timer = null;
+      files.clear();
     },
   };
 }
