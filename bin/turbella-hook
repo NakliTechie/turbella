@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Claude Code hook: reads one hook payload from stdin, hashes what names the
-// call, and sends the daemon an event with hashes only. Starts the daemon if
-// none runs. File bodies, prompts, tool output and notification text never
+// Agent hook for Claude Code and Codex (profiles in src/agents.js): reads one
+// hook payload from stdin, hashes what names the call, and sends the daemon an
+// event with hashes only. Starts the daemon if none runs. File bodies, prompts, tool output and notification text never
 // leave this process.
 //
 // Never fails loudly: errors are swallowed and the exit code is always 0. The
@@ -14,6 +14,7 @@ import { deliver } from '../src/socketWrite.js';
 import { readState } from '../src/paths.js';
 import { contentHash } from '../src/crypto.js';
 import { hashToolInput, errorText } from '../src/event.js';
+import { PROFILES, detectAgent } from '../src/agents.js';
 
 const HARD_EXIT_MS = 2500;
 const MAX_STDIN = 16 * 1024 * 1024;
@@ -39,6 +40,8 @@ process.stdin.on('error', () => process.exit(0));
 process.stdin.on('end', async () => {
   try {
     const p = JSON.parse(stdin || '{}');
+    const agent = detectAgent(p);
+    const profile = PROFILES[agent];
     const transcript = typeof p.transcript_path === 'string' ? p.transcript_path : null;
     if (p.hook_event_name === 'SessionStart') {
       await deliver({ kind: 'ping', transcript, session: p.session_id ?? null });
@@ -47,20 +50,21 @@ process.stdin.on('end', async () => {
       if (st) {
         const url = `http://127.0.0.1:${st.port}`;
         if (process.env.TURBELLA_OPEN !== '0') await openIfNoPage(`${url}/viz`);
-        process.stdout.write(JSON.stringify({ systemMessage: `Turbella: ${url}` }));
+        process.stdout.write(profile.greeting(url));
       }
     } else {
-      const failed = p.hook_event_name === 'PostToolUseFailure';
+      const failed = profile.failed(p);
       const { sig, target } = failed
-        ? { sig: await contentHash(errorText(p.error ?? p.error_message)), target: null }
+        ? { sig: await contentHash(errorText(profile.errorText(p))), target: null }
         : await hashToolInput(p.tool_input);
       await deliver({
-        type: p.hook_event_name ?? 'unknown',
+        type: failed ? 'PostToolUseFailure' : (p.hook_event_name ?? 'unknown'),
         session: p.session_id ?? null,
         ts: Date.now(),
-        agent: 'claude',
+        agent,
         tool: typeof p.tool_name === 'string' ? p.tool_name : null,
         sig, target, transcript,
+        call: typeof p.tool_use_id === 'string' ? p.tool_use_id.slice(0, 200) : null,
       });
     }
   } catch { /* never fail loudly */ }

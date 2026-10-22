@@ -24,6 +24,7 @@
 |---|---|
 | **Claude Code** | `claude plugin marketplace add NakliTechie/turbella`, then `claude plugin install turbella@turbella` |
 | **From a clone** | `git clone https://github.com/NakliTechie/turbella`, then `claude --plugin-dir turbella` |
+| **Codex** | `codex plugin marketplace add <path to a clone>`, `codex plugin add turbella@turbella`, then trust its hooks with `/hooks` in Codex |
 | **The `turbella` command** | in the clone, `npm link` puts it on your PATH; or run `node bin/turbella` |
 
 Start a Claude Code session. The first hook starts the Turbella daemon and opens the
@@ -32,9 +33,8 @@ this off). The session also prints the address, `http://127.0.0.1:7377`. Leave i
 corner of the screen. Events appear as the agent
 works; the page shows the first one within 5 seconds of the first hook.
 
-No config file, no account, nothing to start by hand. No session to watch? Run
-`turbella open` and load any Claude Code transcript from `~/.claude/projects/` with the
-page's **load** button to replay it. Press **Live** to go back to following the agent.
+No config file and no account. To replay a past session, load a Claude Code transcript from
+`~/.claude/projects/` with the timeline's **load** button; **Live** goes back to the agent.
 
 ## Why
 
@@ -75,9 +75,10 @@ only by you and on `127.0.0.1`, and answers only requests addressed to this mach
 
 ## Other agents
 
-Claude Code is the only agent Turbella hooks into today. Any other agent or script can
-send an event with `turbella emit` (for example "switching approach") or read the gauge
-with `turbella status`. Both start the daemon if it is not running, and `emit` never fails
+Turbella hooks into Claude Code and Codex. Codex reports no exit code for shell commands,
+so a failed shell command shows as a normal call; a failed patch shows as a failure.
+Any other agent or script can send an event with `turbella emit` (for example "switching
+approach") or read the gauge with `turbella status`. Both start the daemon if it is not running, and `emit` never fails
 loudly, so an agent can call it mid-task.
 
 ## Commands

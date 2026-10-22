@@ -66,7 +66,9 @@ export async function hashToolInput(input) {
     const { description, ...rest } = args;
     args = rest;
   }
-  const path = args?.file_path ?? args?.notebook_path;
+  // Codex's apply_patch names its file inside the patch text.
+  const patched = typeof args?.command === 'string' ? args.command.match(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/m)?.[1] : null;
+  const path = args?.file_path ?? args?.notebook_path ?? patched;
   return {
     sig: args === undefined ? null : await contentHash(args),
     target: typeof path === 'string' ? await contentHash(path) : null,

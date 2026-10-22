@@ -22,7 +22,7 @@ export const WEIGHTS = Object.freeze({
   idle: 0.2,
 });
 
-const EDIT_TOOLS = /^(Write|Edit|MultiEdit|NotebookEdit)$/;
+const EDIT_TOOLS = /^(Write|Edit|MultiEdit|NotebookEdit|apply_patch)$/;
 const clamp = (v) => Math.min(1, Math.max(0, v));
 
 export function gaugeSnapshot(events, opts = {}) {

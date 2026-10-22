@@ -20,6 +20,7 @@ const TOOL_COLOR = {
   Edit: '#ca8a04',      // yellow
   MultiEdit: '#ca8a04',
   NotebookEdit: '#ca8a04',
+  apply_patch: '#ca8a04',
   Glob: '#0891b2',      // cyan
   Grep: '#0891b2',
   Task: '#be185d',      // pink

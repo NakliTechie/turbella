@@ -15,6 +15,7 @@ import { gaugeSnapshot } from './gauge.js';
 import { toEvent } from './event.js';
 import { sockPath, stateFile, readState } from './paths.js';
 import { createTailer } from './tailer.js';
+import { FAILS_BY_MISSING_END } from './agents.js';
 
 export { readState };
 
@@ -54,6 +55,10 @@ let httpServer = null;
 let idleTimer = null;
 let ownerTimer = null;
 let port = null;
+// Tool starts waiting for their end, for agents that report some failures only
+// by never ending the call: "session call-id" -> start event.
+const openCalls = new Map();
+const MAX_OPEN_CALLS = 1000;
 const tailer = createTailer({ onEvent: (raw) => push(toEvent(raw)) });
 
 function resetIdle() {
@@ -91,10 +96,30 @@ function receive(line) {
   if (typeof raw.type === 'string') {
     const m = HOOK_MAP[raw.type];
     if (!m) return;
-    push(toEvent({ ...raw, ...m }));
+    const ev = toEvent({ ...raw, ...m });
+    trackCall(raw, ev);
+    push(ev);
     return;
   }
   push(toEvent(raw));
+}
+
+function trackCall(raw, ev) {
+  if (!ev || !FAILS_BY_MISSING_END.has(ev.agent)) return;
+  const key = `${ev.session} ${raw.call}`;
+  if (raw.type === 'PreToolUse' && typeof raw.call === 'string') {
+    openCalls.set(key, ev);
+    if (openCalls.size > MAX_OPEN_CALLS) openCalls.delete(openCalls.keys().next().value);
+  } else if (raw.type === 'PostToolUse' || raw.type === 'PostToolUseFailure') {
+    openCalls.delete(key);
+  } else if (ev.kind === 'stop' || ev.kind === 'turn') {
+    // The turn moved on: calls of this session that never ended failed.
+    for (const [k, start] of openCalls) {
+      if (start.session !== ev.session) continue;
+      openCalls.delete(k);
+      push({ ...start, ts: ev.ts, kind: 'tool_fail', status: 'error' });
+    }
+  }
 }
 
 function handleSocket(socket) {
@@ -253,6 +278,7 @@ export function stop() {
   sockConns.clear();
   events = [];
   totals = { events: 0, byKind: {} };
+  openCalls.clear();
   const http = httpServer;
   const net = sockServer;
   httpServer = null;
