@@ -121,6 +121,7 @@ function status() {
     byKind: totals.byKind,
     gauge: Math.round(gaugeSnapshot(recent, { now: Date.now() }) * 1000) / 1000,
     sockPath: sockPath(),
+    pages: clients.size,
   };
 }
 

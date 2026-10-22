@@ -28,6 +28,7 @@ const HOOK = join(ROOT, 'bin', 'turbella-hook');
 const MCP_BIN = join(ROOT, 'bin', 'turbella-mcp');
 const TMP = mkdtempSync('/tmp/tbv-'); // short: macOS caps socket paths at 104 characters
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+process.env.TURBELLA_OPEN = '0'; // SessionStart must not open browser tabs during checks
 
 let failures = 0;
 function check(name, actual, expected) {
@@ -159,6 +160,7 @@ async function main() {
   await sleep(80);
   const st1 = await (await fetch(`http://127.0.0.1:${port}/status`)).json();
   check('daemon: bad lines are dropped and the daemon lives', st1.events, 2);
+  check('daemon: status counts connected pages', st1.pages, 0);
   check('daemon: GET // does not crash it', (await fetch(`http://127.0.0.1:${port}//`)).status, 404);
   const evil = await new Promise((resolve) => {
     const req = httpGet({ host: '127.0.0.1', port, path: '/status', headers: { Host: 'evil.example' } }, (res) => { res.resume(); resolve(res.statusCode); });

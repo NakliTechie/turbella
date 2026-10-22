@@ -26,9 +26,10 @@
 | **From a clone** | `git clone https://github.com/NakliTechie/turbella`, then `claude --plugin-dir turbella` |
 | **The `turbella` command** | in the clone, `npm link` puts it on your PATH; or run `node bin/turbella` |
 
-Start a Claude Code session. The first hook starts the Turbella daemon, and the session
-opens with a line like `Turbella: http://127.0.0.1:7377`. Open that address, or run
-`turbella open`, and leave the page in a corner of the screen. Events appear as the agent
+Start a Claude Code session. The first hook starts the Turbella daemon and opens the page
+in your browser (only when no Turbella page is open; `TURBELLA_OPEN=0` turns this off).
+The session also prints the address, `http://127.0.0.1:7377`. Leave the page in a corner
+of the screen. Events appear as the agent
 works; the page shows the first one within 5 seconds of the first hook.
 
 No config file, no account, nothing to start by hand. No session to watch? Run

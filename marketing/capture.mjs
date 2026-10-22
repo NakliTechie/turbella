@@ -16,7 +16,7 @@ import { launchChrome } from '../scripts/chrome.mjs';
 const here = fileURLToPath(new URL('.', import.meta.url));
 const HOOK = join(here, '..', 'bin', 'turbella-hook');
 const SOCK = `/tmp/tb-capture-${process.pid}.sock`;
-const env = { ...process.env, TURBELLA_SOCK: SOCK, TURBELLA_PORT: '0' };
+const env = { ...process.env, TURBELLA_SOCK: SOCK, TURBELLA_PORT: '0', TURBELLA_OPEN: '0' };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const hook = (payload) => execFileSync(process.execPath, [HOOK], {

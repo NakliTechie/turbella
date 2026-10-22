@@ -6,8 +6,10 @@
 //
 // Never fails loudly: errors are swallowed and the exit code is always 0. The
 // hooks run async (hooks/hooks.json), so a tool call never waits on this.
-// SessionStart runs synchronously instead: it starts the daemon and prints the
+// SessionStart runs synchronously instead: it starts the daemon, opens the
+// page when none is open (TURBELLA_OPEN=0 turns that off), and prints the
 // page address for the person.
+import { spawn } from 'node:child_process';
 import { deliver } from '../src/socketWrite.js';
 import { readState } from '../src/paths.js';
 import { contentHash } from '../src/crypto.js';
@@ -18,6 +20,18 @@ const MAX_STDIN = 16 * 1024 * 1024;
 setTimeout(() => process.exit(0), HARD_EXIT_MS).unref();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Open the page in the default browser unless one is already connected.
+async function openIfNoPage(url) {
+  try {
+    const { pages } = await (await fetch(`${url}/status`, { signal: AbortSignal.timeout(500) })).json();
+    if (pages > 0) return;
+  } catch { return; }
+  const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const child = spawn(opener, [url], { stdio: 'ignore', detached: true });
+  child.on('error', () => {});
+  child.unref();
+}
 let stdin = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (c) => { stdin += c; if (stdin.length > MAX_STDIN) process.exit(0); });
@@ -30,7 +44,11 @@ process.stdin.on('end', async () => {
       await deliver({ kind: 'ping', transcript, session: p.session_id ?? null });
       let st = readState();
       for (let i = 0; !st && i < 10; i++) { await sleep(100); st = readState(); }
-      if (st) process.stdout.write(JSON.stringify({ systemMessage: `Turbella: http://127.0.0.1:${st.port}` }));
+      if (st) {
+        const url = `http://127.0.0.1:${st.port}`;
+        if (process.env.TURBELLA_OPEN !== '0') await openIfNoPage(url);
+        process.stdout.write(JSON.stringify({ systemMessage: `Turbella: ${url}` }));
+      }
     } else {
       const failed = p.hook_event_name === 'PostToolUseFailure';
       const { sig, target } = failed
