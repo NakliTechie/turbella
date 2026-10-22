@@ -262,6 +262,37 @@ async function main() {
   check('codex: session start prints nothing', runHook(cx({ hook_event_name: 'SessionStart', source: 'startup' })), '');
   const forced = execFileSync(process.execPath, [HOOK, '--agent', 'codex'], { input: JSON.stringify({ hook_event_name: 'SessionStart' }), encoding: 'utf8' });
   check('codex: --agent codex overrides detection', forced, '');
+  // Copilot CLI payloads, in the shapes a real Copilot 1.0.97 run sent through the plugin.
+  daemonClear();
+  const cp = (extra) => ({ session_id: 'p', timestamp: 1792653216751, cwd: '/tmp/x', ...extra });
+  runHook(cp({ hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls /missing' }, tool_result: { result_type: 'success', text_result_for_llm: 'ls: /missing: No such file or directory\n<shellId: 1 completed with exit code 1>' } }));
+  runHook(cp({ hook_event_name: 'PostToolUse', timestamp: '2026-10-22T07:13:36.751Z', tool_name: 'Bash', tool_input: { command: 'ls' }, tool_result: { result_type: 'success', text_result_for_llm: '\n<shellId: 0 completed with exit code 0>' } }));
+  runHook({ hookName: 'permissionRequest', sessionId: 'p', timestamp: 1792653216751, toolName: 'bash', toolInput: { command: 'ls' } });
+  runHook(cp({ hook_event_name: 'Stop', transcript_path: '/Users/x/.copilot/session-state/p/events.jsonl', stop_reason: 'end_turn' }));
+  await sleep(150);
+  const cpEvs = (await readSSE(h.port, { count: 4 })).map((x) => x.ev);
+  check('copilot: events get the copilot lane', cpEvs.length === 4 && cpEvs.every((e) => e.agent === 'copilot'), true);
+  check('copilot: a shell call with exit code 1 is a failure', cpEvs[0]?.kind, 'tool_fail');
+  check('copilot: exit code 0 is a normal call', cpEvs[1]?.kind, 'tool');
+  check('copilot: a camelCase permission request is kept', cpEvs[2]?.kind, 'permission');
+  check('copilot: session start prints nothing', runHook(cp({ hook_event_name: 'SessionStart', source: 'new' })), '');
+
+  // Cursor payloads, in the shapes its hooks reference documents.
+  daemonClear();
+  const cu = (extra) => ({ conversation_id: 'u', generation_id: 'g', cursor_version: '2.0', transcript_path: '/Users/x/.cursor/projects/p/agent-transcripts/u.jsonl', ...extra });
+  runHook(cu({ hook_event_name: 'beforeSubmitPrompt', prompt: 'SECRET' }));
+  runHook(cu({ hook_event_name: 'postToolUse', tool_name: 'Shell', tool_input: { command: 'ls' }, tool_output: 'a.txt', tool_use_id: 'k', duration: 120 }));
+  runHook(cu({ hook_event_name: 'postToolUseFailure', tool_name: 'Shell', tool_input: { command: 'make' }, error_message: 'exit 2', failure_type: 'error', duration: 900 }));
+  runHook(cu({ hook_event_name: 'afterAgentThought', text: 'SECRET-THOUGHT', duration_ms: 4200 }));
+  runHook(cu({ hook_event_name: 'stop', status: 'completed' }));
+  await sleep(150);
+  const cuEvs = (await readSSE(h.port, { count: 5 })).map((x) => x.ev);
+  check('cursor: events get the cursor lane', cuEvs.length === 5 && cuEvs.every((e) => e.agent === 'cursor'), true);
+  check('cursor: kinds map (turn, tool, failure, think, stop)', cuEvs.map((e) => e.kind).join(','), 'turn,tool,tool_fail,think,stop');
+  check('cursor: tool duration comes through', cuEvs[1]?.dur_ms, 120);
+  check('cursor: thinking time comes through, its text does not', cuEvs[3]?.dur_ms === 4200 && !JSON.stringify(cuEvs).includes('SECRET'), true);
+  check('cursor: session start prints nothing', runHook(cu({ hook_event_name: 'sessionStart', session_id: 'u' })), '');
+
   daemonClear();
   runHook({ hook_event_name: 'UserPromptSubmit', session_id: 's', prompt: 'hello' });
   await sleep(100);
@@ -312,6 +343,19 @@ async function main() {
   killStateDaemon();
   await sleep(200);
 
+  // ---- install ------------------------------------------------------------------------------
+  const home = join(TMP, 'home');
+  const cursorFile = join(home, '.cursor', 'hooks.json');
+  execFileSync('mkdir', ['-p', join(home, '.cursor')]);
+  writeFileSync(cursorFile, JSON.stringify({ version: 1, hooks: { stop: [{ command: 'mine.sh' }] } }));
+  const inst = (agent) => JSON.parse(execFileSync(process.execPath, [BIN, 'install', agent], { encoding: 'utf8', env: { ...process.env, HOME: home } }));
+  check('install: cursor adds 8 hooks', inst('cursor').added, 8);
+  const written = JSON.parse(readFileSync(cursorFile, 'utf8'));
+  check('install: keeps the hook that was there', written.hooks.stop.some((x) => x.command === 'mine.sh'), true);
+  check('install: never touches a permission hook', 'preToolUse' in written.hooks, false);
+  check('install: a second run adds nothing', inst('cursor').added, 0);
+  check('install: other agents get commands, no file change', Array.isArray(inst('copilot').run), true);
+
   // ---- parity: every door matches the manifest ---------------------------------------------
   const daemonNames = toolsFor('daemon').map((x) => x.name).sort();
   check('parity: one CLI/MCP handler per daemon tool, no extras', JSON.stringify(Object.keys(HANDLERS).sort()), JSON.stringify(daemonNames));
@@ -339,7 +383,9 @@ async function main() {
   };
   check('mcp: initialize', (await call(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {} })).result.serverInfo.name, 'turbella');
   const listed = (await call(2, 'tools/list')).result.tools.map((x) => x.name).sort();
-  check('mcp: tools/list matches the manifest', JSON.stringify(listed), JSON.stringify(daemonNames.map((n) => 'turbella_' + n)));
+  const agentNames = toolsFor('daemon').filter((x) => !x.personOnly).map((x) => 'turbella_' + x.name).sort();
+  check('mcp: tools/list matches the manifest, person-only tools left out', JSON.stringify(listed), JSON.stringify(agentNames));
+  check('mcp: install cannot be called over MCP', (await call(7, 'tools/call', { name: 'turbella_install', arguments: { agent: 'cursor' } })).result.isError, true);
   check('mcp: status tool returns status', (await call(3, 'tools/call', { name: 'turbella_status', arguments: {} })).result.content[0].text.includes('"gauge"'), true);
   const r4 = await call(4, 'tools/call', { name: 'turbella_replay', arguments: { path: FIX('claude-retry-loop.jsonl') } });
   check('mcp: replay matches the CLI', JSON.parse(r4.result.content[0].text).byKind.tool_fail, 2);

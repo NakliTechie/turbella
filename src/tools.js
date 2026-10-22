@@ -5,6 +5,10 @@
 // result, or throws an Error whose message is fit to show.
 
 import { spawn } from 'node:child_process';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { readState } from './paths.js';
 import { deliver } from './socketWrite.js';
 import { contentHash } from './crypto.js';
@@ -72,7 +76,46 @@ async function open() {
   return { url, opened };
 }
 
-export const HANDLERS = Object.freeze({ status, emit, replay, open });
+const HOOK = fileURLToPath(new URL('../bin/turbella-hook', import.meta.url));
+const REPO = fileURLToPath(new URL('..', import.meta.url));
+// Cursor events Turbella listens to. preToolUse and subagentStart are left out:
+// Cursor treats them as permission hooks and blocks on output it cannot parse.
+const CURSOR_EVENTS = ['sessionStart', 'beforeSubmitPrompt', 'postToolUse', 'postToolUseFailure',
+  'afterAgentThought', 'subagentStop', 'stop', 'preCompact'];
+
+async function install({ agent }) {
+  if (agent === 'cursor') {
+    const dir = join(homedir(), '.cursor');
+    const file = join(dir, 'hooks.json');
+    const config = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+    config.version ??= 1;
+    config.hooks ??= {};
+    const command = `"${HOOK}" --agent cursor`;
+    let added = 0;
+    for (const ev of CURSOR_EVENTS) {
+      const list = (config.hooks[ev] ??= []);
+      if (list.some((h) => h.command === command)) continue;
+      list.push({ command, timeout: 5 });
+      added++;
+    }
+    if (added) {
+      mkdirSync(dir, { recursive: true });
+      const tmp = `${file}.turbella.tmp`;
+      writeFileSync(tmp, JSON.stringify(config, null, 2) + '\n');
+      renameSync(tmp, file);
+    }
+    return { agent, file, added, note: added ? 'Restart Cursor to load the hooks.' : 'Already installed.' };
+  }
+  const steps = {
+    claude: [`claude plugin marketplace add ${REPO}`, 'claude plugin install turbella@turbella'],
+    codex: [`codex plugin marketplace add ${REPO}`, 'codex plugin add turbella@turbella', 'then run /hooks in Codex and trust the Turbella hooks'],
+    copilot: ['copilot plugin install NakliTechie/turbella'],
+  }[agent];
+  if (!steps) throw new Error('agent must be one of claude, codex, copilot, cursor');
+  return { agent, run: steps };
+}
+
+export const HANDLERS = Object.freeze({ status, emit, replay, open, install });
 
 // Fail at import if the manifest and the handlers drift apart.
 for (const t of toolsFor('daemon')) {

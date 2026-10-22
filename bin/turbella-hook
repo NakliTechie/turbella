@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Agent hook for Claude Code and Codex (profiles in src/agents.js): reads one
+// Agent hook for Claude Code, Codex, Copilot and Cursor (src/agents.js): reads one
 // hook payload from stdin, hashes what names the call, and sends the daemon an
 // event with hashes only. Starts the daemon if none runs. File bodies, prompts, tool output and notification text never
 // leave this process.
@@ -14,7 +14,7 @@ import { deliver } from '../src/socketWrite.js';
 import { readState } from '../src/paths.js';
 import { contentHash } from '../src/crypto.js';
 import { hashToolInput, errorText } from '../src/event.js';
-import { PROFILES, detectAgent } from '../src/agents.js';
+import { PROFILES, detectAgent, normalise } from '../src/agents.js';
 
 const HARD_EXIT_MS = 2500;
 const MAX_STDIN = 16 * 1024 * 1024;
@@ -42,9 +42,9 @@ process.stdin.on('end', async () => {
     const p = JSON.parse(stdin || '{}');
     const agent = detectAgent(p);
     const profile = PROFILES[agent];
-    const transcript = typeof p.transcript_path === 'string' ? p.transcript_path : null;
-    if (p.hook_event_name === 'SessionStart') {
-      await deliver({ kind: 'ping', transcript, session: p.session_id ?? null });
+    const n = normalise(p);
+    if (n.event === 'SessionStart') {
+      await deliver({ kind: 'ping', transcript: n.transcript, session: n.session });
       let st = readState();
       for (let i = 0; !st && i < 10; i++) { await sleep(100); st = readState(); }
       if (st) {
@@ -53,18 +53,20 @@ process.stdin.on('end', async () => {
         process.stdout.write(profile.greeting(url));
       }
     } else {
-      const failed = profile.failed(p);
+      const failed = profile.failed(n);
       const { sig, target } = failed
-        ? { sig: await contentHash(errorText(profile.errorText(p))), target: null }
-        : await hashToolInput(p.tool_input);
+        ? { sig: await contentHash(errorText(profile.errorText(n))), target: null }
+        : await hashToolInput(n.input);
       await deliver({
-        type: failed ? 'PostToolUseFailure' : (p.hook_event_name ?? 'unknown'),
-        session: p.session_id ?? null,
+        type: failed ? 'PostToolUseFailure' : (n.event ?? 'unknown'),
+        session: n.session,
         ts: Date.now(),
         agent,
-        tool: typeof p.tool_name === 'string' ? p.tool_name : null,
-        sig, target, transcript,
-        call: typeof p.tool_use_id === 'string' ? p.tool_use_id.slice(0, 200) : null,
+        tool: typeof n.tool === 'string' ? n.tool : null,
+        dur_ms: n.durMs,
+        sig, target,
+        transcript: n.transcript,
+        call: typeof n.call === 'string' ? n.call.slice(0, 200) : null,
       });
     }
   } catch { /* never fail loudly */ }

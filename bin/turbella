@@ -8,10 +8,11 @@
 //   turbella open
 //   turbella emit [--kind K] [--status S] [--tool T] [--session ID] [--payload JSON]
 //   turbella replay <transcript.jsonl>
+//   turbella install <claude|codex|copilot|cursor>
 import { start, stop, AlreadyRunning } from '../src/daemon.js';
 import { HANDLERS } from '../src/tools.js';
 
-const USAGE = 'usage: turbella start | status | open | replay <file.jsonl> | emit [--kind K] [--status S] [--tool T] [--session ID] [--payload JSON]';
+const USAGE = 'usage: turbella start | status | open | install <agent> | replay <file.jsonl> | emit [--kind K] [--status S] [--tool T] [--session ID] [--payload JSON]';
 const [cmd, ...rest] = process.argv.slice(2);
 
 // Parse `--key value` pairs; a bare word becomes a positional argument.
@@ -32,6 +33,7 @@ const INPUTS = {
   status: () => ({}),
   open: () => ({}),
   replay: (a) => ({ path: a._[0] }),
+  install: (a) => ({ agent: a._[0] }),
   emit: (a) => {
     let payload;
     if (a.payload !== undefined) {

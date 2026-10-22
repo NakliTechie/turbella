@@ -32,6 +32,7 @@ const HOOK_MAP = {
   StopFailure: { kind: 'stop', status: 'error' },
   PreCompact: { kind: 'stop', status: 'ok' },
   UserPromptSubmit: { kind: 'turn', status: 'ok' },
+  AgentThought: { kind: 'think', status: 'ok' }, // Cursor reports thinking time directly
 };
 
 const SRC = fileURLToPath(new URL('.', import.meta.url));

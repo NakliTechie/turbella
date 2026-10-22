@@ -24,14 +24,14 @@
 |---|---|
 | **Claude Code** | `claude plugin marketplace add NakliTechie/turbella`, then `claude plugin install turbella@turbella` |
 | **From a clone** | `git clone https://github.com/NakliTechie/turbella`, then `claude --plugin-dir turbella` |
+| **Copilot CLI** | `copilot plugin install NakliTechie/turbella` |
+| **Cursor** | `turbella install cursor` adds Turbella's hooks to `~/.cursor/hooks.json`; restart Cursor |
 | **Codex** | `codex plugin marketplace add <path to a clone>`, `codex plugin add turbella@turbella`, then trust its hooks with `/hooks` in Codex |
 | **The `turbella` command** | in the clone, `npm link` puts it on your PATH; or run `node bin/turbella` |
 
-Start a Claude Code session. The first hook starts the Turbella daemon and opens the
-visualiser in your browser (only when no Turbella page is open; `TURBELLA_OPEN=0` turns
-this off). The session also prints the address, `http://127.0.0.1:7377`. Leave it in a
-corner of the screen. Events appear as the agent
-works; the page shows the first one within 5 seconds of the first hook.
+Start a session. The first hook starts the Turbella daemon and opens the visualiser at
+`http://127.0.0.1:7377/viz` when no Turbella page is open (`TURBELLA_OPEN=0` turns that
+off). The first event shows within 5 seconds of the first hook.
 
 No config file and no account. To replay a past session, load a Claude Code transcript from
 `~/.claude/projects/` with the timeline's **load** button; **Live** goes back to the agent.
@@ -75,11 +75,10 @@ only by you and on `127.0.0.1`, and answers only requests addressed to this mach
 
 ## Other agents
 
-Turbella hooks into Claude Code and Codex. Codex reports no exit code for shell commands,
-so a failed shell command shows as a normal call; a failed patch shows as a failure.
-Any other agent or script can send an event with `turbella emit` (for example "switching
-approach") or read the gauge with `turbella status`. Both start the daemon if it is not running, and `emit` never fails
-loudly, so an agent can call it mid-task.
+Turbella hooks into Claude Code, Codex, Copilot CLI and Cursor, each on its own lanes;
+Cursor also reports thinking time. Codex reports no exit code for shell commands, so a
+failed Codex shell command shows as a normal call. Any other agent can send an event with
+`turbella emit` or read the gauge with `turbella status`; `emit` never fails loudly.
 
 ## Commands
 
@@ -88,14 +87,13 @@ turbella open                     # start the daemon if needed, open the visuali
 turbella status                   # events, counts by kind, the gauge, as JSON
 turbella emit --kind tool_fail --tool Bash --payload '"exit 1"'   # send one event
 turbella replay <file.jsonl>      # counts and gauge for a recorded transcript
+turbella install cursor           # add the hooks to Cursor (claude, codex, copilot: prints steps)
 turbella start                    # run the daemon in the foreground
 ```
 
-Every command is declared once in `src/manifest.js`. The same tools are served over MCP
-(`bin/turbella-mcp`, as `turbella_status`, `turbella_emit`, `turbella_replay`,
-`turbella_open`). Both pages publish their controls (play, pause, speed, seek, load, live;
-next look) to agents as `navigator.modelContext` tools, or as `window.turbella.tools` where
-the browser has no WebMCP.
+Every command is declared once in `src/manifest.js`. All but the person-only `install` are
+served over MCP by `bin/turbella-mcp`, and both pages publish their controls to agents as
+`navigator.modelContext` tools, or as `window.turbella.tools` without WebMCP.
 
 ## Verify it yourself
 
@@ -108,9 +106,9 @@ node marketing/capture.mjs   # regenerate the README images and social card from
 `npm run verify` runs the real hook binary against a daemon, checks that no file body,
 prompt, output or error text leaves the hook, and fails if the CLI, the MCP tool list or
 the page controls stop matching the manifest. `npm run ttfv` drives headless Chrome (set
-`CHROME_BIN` if Chrome is not in `/Applications`) and measured under 200 ms on an Apple
-Silicon Mac. Delivery from a real Claude Code session (`claude -p --plugin-dir .`) was
-checked by hand on 2026-10-21; no script repeats that check.
+`CHROME_BIN` if Chrome is not in `/Applications`) and measured under 250 ms on an Apple
+Silicon Mac. Delivery from real Claude Code, Codex and Copilot CLI sessions was checked by
+hand on 2026-10-21 and 2026-10-22; Cursor was not. No script repeats those checks.
 
 ## License
 

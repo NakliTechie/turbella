@@ -24,7 +24,8 @@ const PROTOCOL_VERSION = '2024-11-05';
 const CAPABILITIES = { resources: {}, tools: {} };
 
 const PREFIX = 'turbella_';
-const TOOLS = toolsFor('daemon').map((t) => ({
+// Person-only tools stay off MCP: an agent must not change the person's settings.
+const TOOLS = toolsFor('daemon').filter((t) => !t.personOnly).map((t) => ({
   name: PREFIX + t.name,
   description: t.description,
   inputSchema: t.inputSchema,
@@ -146,7 +147,8 @@ async function handleLine(stdout, line) {
 }
 
 async function handleToolCall(name, args) {
-  const tool = name?.startsWith(PREFIX) ? HANDLERS[name.slice(PREFIX.length)] : null;
+  const listed = TOOLS.some((t) => t.name === name);
+  const tool = listed ? HANDLERS[name.slice(PREFIX.length)] : null;
   if (!tool) {
     return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
   }

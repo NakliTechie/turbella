@@ -10,8 +10,9 @@
 // `effect` says what a call changes: `read` changes nothing; `view` changes
 // only what this page shows; `append` adds one event to the in-memory buffer
 // (no undo needed, it ages out of the gauge window); `open` opens a browser tab.
-// No Turbella command needs a person's own judgment or consent, so none is
-// person-only: every entry sets `personOnly: false` on purpose.
+// `config` changes another tool's settings file. Only `install` does that, and
+// it is person-only: it stays on the CLI and is never offered to agents over
+// MCP. Every other entry sets `personOnly: false` on purpose.
 //
 // scripts/verify.mjs checks parity: the CLI, the MCP tool list and the page's
 // controls each match this list.
@@ -54,6 +55,17 @@ export const MANIFEST = Object.freeze([
     name: 'open', place: 'daemon', effect: 'open', personOnly: false,
     description: 'Start the daemon if needed and open the visualiser in the default browser (it falls back to the timeline without WebGL 2). Returns the URL.',
     inputSchema: none,
+  },
+
+  {
+    name: 'install', place: 'daemon', effect: 'config', personOnly: true,
+    description: "Set Turbella up for an agent. For Cursor it adds Turbella's hooks to ~/.cursor/hooks.json; for Claude Code, Codex and Copilot it prints the plugin commands to run. Person-only: it changes the person's own tool settings, so it is on the CLI and not offered to agents over MCP.",
+    inputSchema: {
+      type: 'object',
+      properties: { agent: { type: 'string', enum: ['claude', 'codex', 'copilot', 'cursor'] } },
+      required: ['agent'],
+      additionalProperties: false,
+    },
   },
 
   // ---- page -----------------------------------------------------------------
