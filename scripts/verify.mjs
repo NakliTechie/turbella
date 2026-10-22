@@ -16,6 +16,7 @@ import { readClaudeFile } from '../src/reader.js';
 import { KIND } from '../src/event.js';
 import { gaugeSnapshot } from '../src/gauge.js';
 import { createPlayer } from '../src/playback.js';
+import { createSignal, loudness, SAMPLES } from '../src/signal.js';
 import { start, stop, readState, AlreadyRunning, __state as daemonState, __clear as daemonClear } from '../src/daemon.js';
 import { writeEvent } from '../src/socketWrite.js';
 import { MANIFEST, toolsFor } from '../src/manifest.js';
@@ -131,6 +132,27 @@ async function main() {
   check('playback: its duration spans them', lp.snapshot().duration, 1000);
   check('playback: a one-instant session ends at progress 1', createPlayer([{ ts: 5 }]).progress, 1);
 
+  // ---- signal (events to waveform) ---------------------------------------------------
+  let seed = 1;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const sig = createSignal({ random: rnd });
+  const quiet = loudness(sig.frame(0).timeByteArray);
+  check('signal: 1,024 samples per channel', sig.frame(16).timeByteArrayL.length, SAMPLES);
+  check('signal: no events is near silence', quiet < 1, true);
+  sig.hit({ kind: 'tool', status: 'ok', tool: 'Read' });
+  const toolLoud = loudness(sig.frame(32).timeByteArray);
+  const sig2 = createSignal({ random: rnd });
+  sig2.frame(0);
+  sig2.hit({ kind: 'tool_fail', tool: 'Bash' });
+  const failLoud = loudness(sig2.frame(16).timeByteArray);
+  check('signal: a tool call makes sound', toolLoud > 5, true);
+  check('signal: a failure is louder than a tool call', failLoud > toolLoud, true);
+  check('signal: sound decays within 3 s', loudness(sig.frame(3032).timeByteArray) < 1, true);
+  sig.setTurbulence(1);
+  check('signal: turbulence raises the floor', loudness(sig.frame(3048).timeByteArray) > 5, true);
+  sig.hit({ kind: 'stop' });
+  check('signal: unknown or stop events add no voice', sig.voices, 0);
+
   // ---- daemon ------------------------------------------------------------------------
   const sock = useSock('d.sock');
   const { port } = await start();
@@ -172,6 +194,14 @@ async function main() {
   let served = 0;
   for (const m of pageImports) if ((await fetch(`http://127.0.0.1:${port}/src/${m}`)).status === 200) served++;
   check(`daemon: serves all ${pageImports.length} page modules`, served, pageImports.length);
+  check('daemon: serves the visualiser', (await fetch(`http://127.0.0.1:${port}/viz`)).status, 200);
+  const vizModules = ['viz.js', ...[...readFileSync(join(ROOT, 'src', 'viz.js'), 'utf8').matchAll(/from '\.\/([a-z]+\.js)'/g)].map((m) => m[1])];
+  let vizServed = 0;
+  for (const m of vizModules) if ((await fetch(`http://127.0.0.1:${port}/src/${m}`)).status === 200) vizServed++;
+  check(`daemon: serves all ${vizModules.length} visualiser modules`, vizServed, vizModules.length);
+  check('daemon: serves the bundled engine', (await fetch(`http://127.0.0.1:${port}/vendor/butterchurn.min.js`)).status, 200);
+  check('daemon: serves the bundled presets', (await fetch(`http://127.0.0.1:${port}/vendor/butterchurnPresets.min.js`)).status, 200);
+  check('daemon: serves nothing else from vendor/', (await fetch(`http://127.0.0.1:${port}/vendor/LICENSE`)).status, 404);
   check('daemon: refuses paths outside src/', (await fetch(`http://127.0.0.1:${port}/src/%2e%2e/package.json`)).status, 404);
 
   // tailer: a hook names the transcript; new thinking lines become think events
@@ -207,6 +237,10 @@ async function main() {
   check('hook: same call hashes the same live and in replay', hooked[0]?.ev.sig, lsSig);
   check('hook: different arguments, different hash', hooked[1]?.ev.sig !== hooked[0]?.ev.sig, true);
   check('hook: an edit carries a file-path hash', /^sha256:/.test(hooked[2]?.ev.target ?? ''), true);
+  daemonClear();
+  runHook({ hook_event_name: 'UserPromptSubmit', session_id: 's', prompt: 'hello' });
+  await sleep(100);
+  check('hook: a prompt submission becomes a turn event', daemonState().byKind.turn, 1);
   await stop();
 
   // what leaves the hook: a bare socket stands in for the daemon and records it
@@ -218,9 +252,11 @@ async function main() {
   runHook({ hook_event_name: 'PreToolUse', session_id: 's', tool_name: 'Task', tool_input: { prompt: 'SECRET-PROMPT' } });
   runHook({ hook_event_name: 'PostToolUse', session_id: 's', tool_name: 'Read', tool_input: { file_path: 'k.txt' }, tool_response: 'SECRET-OUTPUT' });
   runHook({ hook_event_name: 'PostToolUseFailure', session_id: 's', tool_name: 'Bash', tool_input: {}, error: 'SECRET-ERROR' });
+  runHook({ hook_event_name: 'UserPromptSubmit', session_id: 's', prompt: 'SECRET-USER-PROMPT' });
   await sleep(100);
   await new Promise((r) => sniff.close(r));
-  check('hook: forwarded 4 lines', line.trim().split('\n').length, 4);
+  check('hook: forwarded 5 lines', line.trim().split('\n').length, 5);
+  check('hook: a prompt submission is sent as its event name only', line.includes('"type":"UserPromptSubmit"'), true);
   check('hook: no file body, prompt, output or error text leaves it', /SECRET/.test(line), false);
 
   // no daemon running: the hook starts one; SessionStart prints its address
@@ -260,6 +296,10 @@ async function main() {
   check('parity: every page control names its tool', controls.every((c) => /data-tool="/.test(c)), true);
   const pageNames = [...new Set(controls.flatMap((c) => c.match(/data-tool="([^"]+)"/)[1].split(' ')))].sort();
   check('parity: page controls cover exactly the page tools', JSON.stringify(pageNames), JSON.stringify(toolsFor('page').map((x) => x.name).sort()));
+  const vizControls = [...readFileSync(join(ROOT, 'web', 'viz.html'), 'utf8').matchAll(/<(button|select|input)\b[^>]*>/g)].map((m) => m[0]);
+  check('parity: every visualiser control names its tool', vizControls.every((c) => /data-tool="/.test(c)), true);
+  const vizNames = [...new Set(vizControls.flatMap((c) => c.match(/data-tool="([^"]+)"/)[1].split(' ')))].sort();
+  check('parity: visualiser controls cover exactly the viz tools', JSON.stringify(vizNames), JSON.stringify(toolsFor('viz').map((x) => x.name).sort()));
 
   // ---- MCP server ------------------------------------------------------------------------------
   useSock('m.sock');

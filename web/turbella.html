@@ -26,6 +26,9 @@
   select, input[type=file] { font: inherit; font-size: 12px; padding: 4px;
     background: var(--panel); border: 1px solid var(--line); color: var(--ink); border-radius: 4px; }
   #status { font-size: 12px; color: var(--muted); }
+  #toViz { font-size: 13px; color: var(--accent); text-decoration: none; }
+  #toViz:hover { text-decoration: underline; }
+  #note { flex-basis: 100%; font-size: 12px; color: var(--warn); }
   #gauge { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
   #gaugeBar { width: 120px; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
   #gaugeFill { height: 100%; width: 0; background: var(--accent); transition: width 0.3s, background 0.3s; }
@@ -42,6 +45,7 @@
 <body>
 <header>
   <h1>Turbella</h1>
+  <a id="toViz" href="/viz">Visualiser</a>
   <button id="btnPlay" data-tool="play pause">▶ Play</button>
   <button id="btnLive" data-tool="go_live">● Live</button>
   <label>speed</label>
@@ -57,6 +61,7 @@
   <label>load</label>
   <input id="fileInput" data-tool="load_events" type="file" accept=".json,.jsonl,.txt">
   <div id="status">idle</div>
+  <div id="note" hidden>The visualiser needs WebGL 2, which this browser has turned off. The Claude desktop app's browser pane has it.</div>
   <div id="gauge" title="Turbulence: repeated failures, edit thrash, tool switching and time since progress, 0 to 1">
     turbulence <div id="gaugeBar"><div id="gaugeFill"></div></div> <span id="gaugeValue">0.00</span>
   </div>
@@ -82,6 +87,7 @@
   import { createRenderer } from '../src/render.js';
   import { readClaudeEvents } from '../src/transcript.js';
   import { toolsFor } from '../src/manifest.js';
+  import { publishTools } from '../src/agentface.js';
   import { gaugeSnapshot } from '../src/gauge.js';
 
   const $ = (id) => document.getElementById(id);
@@ -234,20 +240,7 @@
     },
   };
 
-  // Publish the agent face from the manifest; refuse to load if a tool lacks a handler.
-  const PAGE_TOOLS = toolsFor('page');
-  for (const t of PAGE_TOOLS) {
-    if (!TOOLS[t.name]) throw new Error(`manifest tool "${t.name}" has no page handler`);
-  }
-  window.turbella = { tools: Object.fromEntries(PAGE_TOOLS.map((t) => [t.name, (args = {}) => TOOLS[t.name](args)])) };
-  if (navigator.modelContext?.registerTool) {
-    for (const t of PAGE_TOOLS) {
-      navigator.modelContext.registerTool({
-        name: t.name, description: t.description, inputSchema: t.inputSchema,
-        execute: async (args) => ({ content: [{ type: 'text', text: JSON.stringify(await TOOLS[t.name](args ?? {})) }] }),
-      });
-    }
-  }
+  publishTools('page', TOOLS);
 
   // ---- the human door: controls call the same tools -------------------------
 
@@ -267,6 +260,7 @@
 
   // The page is served by the daemon, so it starts by following it live.
   TOOLS.go_live();
+  if (new URLSearchParams(location.search).get('from') === 'viz') $('note').hidden = false;
 </script>
 </body>
 </html>

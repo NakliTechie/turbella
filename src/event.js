@@ -24,6 +24,7 @@ export const KIND = Object.freeze({
   SUBAGENT: 'subagent',
   STOP: 'stop',
   ERROR: 'error',
+  TURN: 'turn', // the person sent a prompt; never carries the prompt
 });
 
 export const STATUS = Object.freeze({

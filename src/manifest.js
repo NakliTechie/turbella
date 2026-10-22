@@ -2,9 +2,10 @@
 //
 // Two places run commands, and each reads this list:
 //   daemon  the CLI (`turbella <name>`) and the MCP server (`turbella_<name>`)
-//   page    the controls on the canvas page, published to agents as
+//   page    the controls on the timeline page, published to agents as
 //           navigator.modelContext tools where the browser has it, and as
 //           window.turbella.tools[name] otherwise
+//   viz     the controls on the visualiser page, published the same way
 //
 // `effect` says what a call changes: `read` changes nothing; `view` changes
 // only what this page shows; `append` adds one event to the in-memory buffer
@@ -51,7 +52,7 @@ export const MANIFEST = Object.freeze([
   },
   {
     name: 'open', place: 'daemon', effect: 'open', personOnly: false,
-    description: 'Start the daemon if needed and open the live page in the default browser. Returns the page URL.',
+    description: 'Start the daemon if needed and open the visualiser in the default browser (it falls back to the timeline without WebGL 2). Returns the URL.',
     inputSchema: none,
   },
 
@@ -91,6 +92,13 @@ export const MANIFEST = Object.freeze([
   {
     name: 'go_live', place: 'page', effect: 'view', personOnly: false,
     description: 'Follow the daemon live: show its events and keep the playhead on the newest. Pause, play or seek to stop following.',
+    inputSchema: none,
+  },
+
+  // ---- visualiser ---------------------------------------------------------
+  {
+    name: 'next_look', place: 'viz', effect: 'view', personOnly: false,
+    description: 'Blend the visualiser to another preset now, instead of waiting for the next turn.',
     inputSchema: none,
   },
 ]);

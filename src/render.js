@@ -168,7 +168,15 @@ export function createRenderer(canvas, opts = {}) {
       const cy = laneY(laneOf(e));
       const c = colorFor(e);
 
-      if (e.kind === 'tool_fail') {
+      if (e.kind === 'turn') {
+        // a new prompt: a thin divider across the lane
+        ctx.strokeStyle = '#c7c7c2';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - 30);
+        ctx.lineTo(cx, cy + 30);
+        ctx.stroke();
+      } else if (e.kind === 'tool_fail') {
         // red spike
         ctx.fillStyle = c;
         ctx.beginPath();

@@ -24,7 +24,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Open the page in the default browser unless one is already connected.
 async function openIfNoPage(url) {
   try {
-    const { pages } = await (await fetch(`${url}/status`, { signal: AbortSignal.timeout(500) })).json();
+    const { pages } = await (await fetch(`${new URL(url).origin}/status`, { signal: AbortSignal.timeout(500) })).json();
     if (pages > 0) return;
   } catch { return; }
   const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
@@ -46,7 +46,7 @@ process.stdin.on('end', async () => {
       for (let i = 0; !st && i < 10; i++) { await sleep(100); st = readState(); }
       if (st) {
         const url = `http://127.0.0.1:${st.port}`;
-        if (process.env.TURBELLA_OPEN !== '0') await openIfNoPage(url);
+        if (process.env.TURBELLA_OPEN !== '0') await openIfNoPage(`${url}/viz`);
         process.stdout.write(JSON.stringify({ systemMessage: `Turbella: ${url}` }));
       }
     } else {

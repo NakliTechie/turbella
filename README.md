@@ -16,7 +16,7 @@
   <img alt="no dependencies" src="https://img.shields.io/badge/npm%20dependencies-0-2563eb?style=flat-square">
 </p>
 
-![A live Turbella page: one Claude Code lane with tool ticks, three identical test failures marked as a repeat, a permission wait in amber, and the turbulence gauge at 0.49](marketing/hero.png)
+![The Turbella visualiser: a MilkDrop preset moving to a Claude Code session's tool calls and failures](marketing/viz.jpg)
 
 ## Install
 
@@ -26,10 +26,10 @@
 | **From a clone** | `git clone https://github.com/NakliTechie/turbella`, then `claude --plugin-dir turbella` |
 | **The `turbella` command** | in the clone, `npm link` puts it on your PATH; or run `node bin/turbella` |
 
-Start a Claude Code session. The first hook starts the Turbella daemon and opens the page
-in your browser (only when no Turbella page is open; `TURBELLA_OPEN=0` turns this off).
-The session also prints the address, `http://127.0.0.1:7377`. Leave the page in a corner
-of the screen. Events appear as the agent
+Start a Claude Code session. The first hook starts the Turbella daemon and opens the
+visualiser in your browser (only when no Turbella page is open; `TURBELLA_OPEN=0` turns
+this off). The session also prints the address, `http://127.0.0.1:7377`. Leave it in a
+corner of the screen. Events appear as the agent
 works; the page shows the first one within 5 seconds of the first hook.
 
 No config file, no account, nothing to start by hand. No session to watch? Run
@@ -38,9 +38,8 @@ page's **load** button to replay it. Press **Live** to go back to following the 
 
 ## Why
 
-You wait on an agent for minutes and learn nothing from the wait. Was it thinking,
-retrying the same failing command, blocked on a permission prompt, or finished? The
-transcript tells you afterwards. Turbella shows it while it happens.
+You wait on an agent for minutes and learn nothing. Is it thinking, retrying the same
+failing command, or blocked on a permission prompt? Turbella shows it while it happens.
 
 Each session gets a lane, and each tool call is a tick coloured by tool. A failure is a
 red spike, and the same failure twice gets a repeat mark. A permission wait is amber; a
@@ -50,10 +49,20 @@ edits to one file, the same tool called over and over, and time since the last
 successful tool call. That last one rises through a silent wait and reaches its full
 share after a minute, because silence is part of being stuck.
 
-The idea comes from "Fractal basins trap latent reasoning" (Gilpin's group,
-arXiv:2609.04963): reasoning stuck near almost-correct answers keeps switching
-candidates, and that switching rate measures how stuck it is. Turbella measures the
-agent's observable version of that.
+The gauge borrows from "Fractal basins trap latent reasoning" (arXiv:2609.04963): reasoning
+stuck near almost-right answers keeps switching, and the switching measures how stuck it is.
+
+## Two views
+
+**The visualiser** (`/viz`) plays your agent like music. Every tool call is a pluck, a
+failure is a bass hit, thinking is a slow swell and a permission wait is a held note; the
+turbulence gauge adds noise and wobble as the agent gets stuck. Each new prompt blends to
+another of about a hundred MilkDrop presets, run by [Butterchurn](https://github.com/jberg/butterchurn).
+Nothing plays aloud. It needs WebGL 2; without it the page sends you to the timeline.
+
+**The timeline** (`/`) is the plain record: what happened, when, and how often it repeated.
+
+![The Turbella timeline: one Claude Code lane with tool ticks, three identical test failures marked as a repeat, a permission wait in amber, and the turbulence gauge at 0.49](marketing/hero.png)
 
 ## What leaves your machine
 
@@ -74,7 +83,7 @@ loudly, so an agent can call it mid-task.
 ## Commands
 
 ```
-turbella open                     # start the daemon if needed, open the page
+turbella open                     # start the daemon if needed, open the visualiser
 turbella status                   # events, counts by kind, the gauge, as JSON
 turbella emit --kind tool_fail --tool Bash --payload '"exit 1"'   # send one event
 turbella replay <file.jsonl>      # counts and gauge for a recorded transcript
@@ -83,16 +92,16 @@ turbella start                    # run the daemon in the foreground
 
 Every command is declared once in `src/manifest.js`. The same tools are served over MCP
 (`bin/turbella-mcp`, as `turbella_status`, `turbella_emit`, `turbella_replay`,
-`turbella_open`). The page publishes its own controls (play, pause, speed, seek, load,
-live) to agents as `navigator.modelContext` tools, or as `window.turbella.tools` where the
-browser has no WebMCP.
+`turbella_open`). Both pages publish their controls (play, pause, speed, seek, load, live;
+next look) to agents as `navigator.modelContext` tools, or as `window.turbella.tools` where
+the browser has no WebMCP.
 
 ## Verify it yourself
 
 ```
 npm run verify     # readers, gauge, playback, daemon, hook binary, CLI, MCP, manifest parity
 npm run ttfv       # cold start: first hook to event on the page, gate 5 s (needs Chrome)
-node marketing/capture.mjs   # regenerate the hero and social card from a scripted session
+node marketing/capture.mjs   # regenerate the README images and social card from a scripted session
 ```
 
 `npm run verify` runs the real hook binary against a daemon, checks that no file body,
@@ -104,6 +113,7 @@ checked by hand on 2026-10-21; no script repeats that check.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). The bundled Butterchurn engine and presets are MIT too;
+see [web/vendor/LICENSE](web/vendor/LICENSE).
 
 For a coding agent or contributor: [AGENTS.md](AGENTS.md)

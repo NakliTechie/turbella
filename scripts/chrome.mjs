@@ -17,6 +17,8 @@ export async function launchChrome({ width = 1280, height = 800, scale = 2 } = {
   const profile = mkdtempSync(join(tmpdir(), 'tb-chrome-'));
   const proc = spawn(CHROME, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
     `--window-size=${width},${height}`, '--hide-scrollbars',
+    // Software WebGL, so the visualiser renders without a GPU.
+    '--enable-unsafe-swiftshader', '--use-angle=swiftshader',
     '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore' });
 
   const portFile = join(profile, 'DevToolsActivePort');
@@ -44,8 +46,8 @@ export async function launchChrome({ width = 1280, height = 800, scale = 2 } = {
       const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
       return r.result?.result?.value;
     },
-    async screenshot() {
-      const r = await send('Page.captureScreenshot', { format: 'png' });
+    async screenshot(format = 'png') {
+      const r = await send('Page.captureScreenshot', format === 'jpeg' ? { format, quality: 82 } : { format });
       return Buffer.from(r.result.data, 'base64');
     },
     async close() {

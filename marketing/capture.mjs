@@ -1,4 +1,5 @@
-// Regenerate the README hero and the 1280×640 social card from the real page.
+// Regenerate the README images (visualiser and timeline) and the 1280×640
+// social card from the real pages.
 //
 // Run:  node marketing/capture.mjs
 //
@@ -60,6 +61,23 @@ async function main() {
   const status = await page.evaluate("document.getElementById('status').textContent");
   await page.close();
 
+  // The visualiser, playing the same session again.
+  const vizPage = await launchChrome({ width: 1440, height: 810, scale: 1 });
+  await vizPage.send('Page.navigate', { url: `http://127.0.0.1:${port}/viz` });
+  await sleep(2500);
+  const webgl = await vizPage.evaluate("location.pathname === '/viz' && !!window.turbella?.tools?.next_look");
+  for (const [tool, tool_input, outcome, ms] of SESSION) {
+    hook({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input });
+    if (outcome === 'ask') hook({ hook_event_name: 'PermissionRequest', tool_name: tool, tool_input });
+    await sleep(ms);
+    if (outcome === 'fail') hook({ hook_event_name: 'PostToolUseFailure', tool_name: tool, tool_input, error: FAIL });
+    else hook({ hook_event_name: 'PostToolUse', tool_name: tool, tool_input });
+    await sleep(250);
+  }
+  const preset = await vizPage.evaluate("document.getElementById('preset').textContent");
+  writeFileSync(join(here, 'viz.jpg'), await vizPage.screenshot('jpeg'));
+  await vizPage.close();
+
   const card = await launchChrome({ width: 1280, height: 640, scale: 1 });
   await card.send('Page.navigate', { url: `file://${join(here, 'social.html')}` });
   await sleep(800);
@@ -67,7 +85,7 @@ async function main() {
   await card.close();
 
   const kb = (f) => Math.round(statSync(join(here, f)).size / 1024);
-  console.log(JSON.stringify({ status, gauge, hero_kb: kb('hero.png'), social_kb: kb('social.png') }));
+  console.log(JSON.stringify({ status, gauge, webgl, preset, hero_kb: kb('hero.png'), viz_kb: kb('viz.jpg'), social_kb: kb('social.png') }));
 }
 
 main()

@@ -61,7 +61,7 @@ async function replay({ path }) {
 }
 
 async function open() {
-  const url = `http://127.0.0.1:${(await ensureDaemon()).port}`;
+  const url = `http://127.0.0.1:${(await ensureDaemon()).port}/viz`;
   const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
   // Report a missing opener instead of crashing; the URL is still returned.
   const opened = await new Promise((resolve) => {

@@ -30,6 +30,7 @@ const HOOK_MAP = {
   Stop: { kind: 'stop', status: 'ok' },
   StopFailure: { kind: 'stop', status: 'error' },
   PreCompact: { kind: 'stop', status: 'ok' },
+  UserPromptSubmit: { kind: 'turn', status: 'ok' },
 };
 
 const SRC = fileURLToPath(new URL('.', import.meta.url));
@@ -152,9 +153,17 @@ async function handleHttp(req, res) {
     res.end(JSON.stringify(status()));
     return;
   }
-  if (path === '/' || path === '/index.html') {
+  const page = { '/': 'turbella.html', '/index.html': 'turbella.html', '/viz': 'viz.html' }[path];
+  if (page) {
     res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(await readFile(join(WEB, 'turbella.html'), 'utf8'));
+    res.end(await readFile(join(WEB, page), 'utf8'));
+    return;
+  }
+  // The visualiser's bundled library: these two files only.
+  const vendor = path.match(/^\/vendor\/(butterchurn\.min\.js|butterchurnPresets\.min\.js)$/);
+  if (vendor) {
+    res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'max-age=86400' });
+    res.end(await readFile(join(WEB, 'vendor', vendor[1]), 'utf8'));
     return;
   }
   // The page's modules: bare lowercase names under src/ only.
