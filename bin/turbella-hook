@@ -19,7 +19,10 @@ process.stdin.on('data', (c) => { stdin += c; });
 process.stdin.on('error', () => process.exit(0));
 process.stdin.on('end', async () => {
   try {
-    const payload = JSON.parse(stdin || '{}');
+    // Keep only what the daemon hashes or labels. Tool output, notification
+    // text and everything else stay in this process.
+    const { hook_event_name, session_id, tool_name, tool_input, error, error_message } = JSON.parse(stdin || '{}');
+    const payload = { hook_event_name, session_id, tool_name, tool_input, error, error_message };
     const envelope = {
       type: payload.hook_event_name ?? 'unknown',
       session: payload.session_id ?? null,

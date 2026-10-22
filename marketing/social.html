@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Turbella social card</title>
+<!-- 1280×640 repo card; marketing/capture.mjs renders it with hero.png beside it. -->
+<style>
+  html, body { margin: 0; width: 1280px; height: 640px; overflow: hidden; background: #f7f7f5;
+    font-family: system-ui, -apple-system, sans-serif; color: #1c1c1a; }
+  .card { display: grid; grid-template-columns: 430px 1fr; height: 100%; }
+  .words { padding: 150px 0 0 64px; }
+  h1 { font-size: 64px; margin: 0 0 24px; letter-spacing: -0.01em; font-weight: 650; }
+  p { font-size: 30px; line-height: 1.3; margin: 0; color: #3a3a36; }
+  .shot { position: relative; }
+  .shot img { position: absolute; left: 0; top: 150px; width: 800px; border: 1px solid #e5e5e2;
+    border-radius: 10px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08); }
+</style>
+<div class="card">
+  <div class="words">
+    <h1>Turbella</h1>
+    <p>See what your coding agent is doing while you wait, and when it is stuck.</p>
+  </div>
+  <div class="shot"><img src="hero.png" alt=""></div>
+</div>
+</html>

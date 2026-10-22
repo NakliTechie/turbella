@@ -1,7 +1,7 @@
 {
   "name": "turbella",
   "version": "0.1.0",
-  "description": "Ambient agent-turn visualiser: lanes, tool-kind bars, failure spikes, thinking pulse, turbulence gauge.",
+  "description": "Shows an agent's tool calls, failures, permission waits and thinking live in a local page, with a gauge for when it is stuck.",
   "author": {
     "name": "NakliTechie"
   }

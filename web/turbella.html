@@ -4,30 +4,39 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Turbella</title>
 <style>
+  /* Light by default and not tied to the system theme (house rule for app UIs). */
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --canvas: #ffffff; --line: #e5e5e2;
+    --ink: #1c1c1a; --muted: #6b6b66; --accent: #2563eb; --warn: #d97706; --bad: #dc2626;
+  }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: #0b0f19; color: #e2e8f0;
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
     font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
   body { display: grid; grid-template-rows: auto 1fr auto; }
-  header { padding: 10px 14px; border-bottom: 1px solid #1e293b;
-    background: #0f172a; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  h1 { font-size: 14px; margin: 0; letter-spacing: 0.05em; text-transform: uppercase;
-    opacity: 0.7; }
-  button { background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
-    padding: 6px 12px; border-radius: 6px; font: inherit; cursor: pointer; }
-  button:hover { border-color: #64748b; }
-  button.active { background: #2563eb; border-color: #2563eb; }
-  input[type=range] { accent-color: #2563eb; width: 140px; }
-  label { font-size: 12px; opacity: 0.8; margin-right: 6px; }
+  header { padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 14px; margin: 0 6px 0 0; letter-spacing: 0.04em; font-weight: 600; }
+  button { background: var(--panel); border: 1px solid var(--line); color: var(--ink);
+    padding: 6px 12px; border-radius: 6px; font: inherit; font-size: 13px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  input[type=range] { accent-color: var(--accent); width: 140px; }
+  label { font-size: 12px; color: var(--muted); }
   select, input[type=file] { font: inherit; font-size: 12px; padding: 4px;
-    background: #1e293b; border: 1px solid #334155; color: #e2e8f0; border-radius: 4px; }
-  #status { font-size: 12px; opacity: 0.6; margin-left: 10px; }
-  main { position: relative; display: grid; grid-template-rows: 1fr auto; }
-  #wrap { position: relative; background: #050a14; overflow: hidden; }
-  canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
-  footer { padding: 8px 14px; border-top: 1px solid #1e293b; background: #0f172a;
-    display: flex; gap: 14px; align-items: center; font-size: 12px; opacity: 0.7; }
-  .hint { font-size: 11px; opacity: 0.5; }
-  .overlay { position: absolute; top: 10px; left: 10px; pointer-events: none; }
+    background: var(--panel); border: 1px solid var(--line); color: var(--ink); border-radius: 4px; }
+  #status { font-size: 12px; color: var(--muted); }
+  #gauge { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  #gaugeBar { width: 120px; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+  #gaugeFill { height: 100%; width: 0; background: var(--accent); transition: width 0.3s, background 0.3s; }
+  #gaugeValue { font-variant-numeric: tabular-nums; color: var(--ink); min-width: 2.5em; }
+  main { position: relative; min-height: 0; }
+  #wrap { position: absolute; inset: 0; background: var(--canvas); overflow: hidden; }
+  canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+  footer { padding: 8px 16px; border-top: 1px solid var(--line); background: var(--panel);
+    font-size: 12px; color: var(--muted); }
+  .overlay { position: absolute; bottom: 10px; left: 16px; pointer-events: none; }
+  #overlayTime { font: 12px ui-monospace, monospace; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -48,18 +57,20 @@
   <label>load</label>
   <input id="fileInput" data-tool="load_events" type="file" accept=".json,.jsonl,.txt">
   <div id="status">idle</div>
+  <div id="gauge" title="Turbulence: repeated failures, edit thrash, tool switching and time since progress, 0 to 1">
+    turbulence <div id="gaugeBar"><div id="gaugeFill"></div></div> <span id="gaugeValue">0.00</span>
+  </div>
 </header>
 <main>
   <div id="wrap">
     <canvas id="canvas"></canvas>
     <div class="overlay">
-      <div id="overlayTime" style="font:12px monospace; background:rgba(0,0,0,0.5);
-        padding:2px 6px; border-radius:4px; display:inline-block;">— / —</div>
+      <div id="overlayTime">— / —</div>
     </div>
   </div>
 </main>
 <footer>
-  <span class="hint">red spike = failed tool · amber = permission wait · violet pulse = thinking · loop glyph = stuck on repeat</span>
+  <span>red spike = failed tool · amber = permission wait · violet pulse = thinking · loop glyph = stuck on repeat</span>
 </footer>
 
 <script type="module">
@@ -71,6 +82,7 @@
   import { createRenderer } from '../src/render.js';
   import { readClaudeEvents } from '../src/transcript.js';
   import { toolsFor } from '../src/manifest.js';
+  import { gaugeSnapshot } from '../src/gauge.js';
 
   const $ = (id) => document.getElementById(id);
   const canvas = $('canvas');
@@ -81,21 +93,12 @@
   const fileInput = $('fileInput');
   const status = $('status');
   const overlayTime = $('overlayTime');
+  const gaugeFill = $('gaugeFill');
+  const gaugeValue = $('gaugeValue');
 
   const renderer = createRenderer(canvas);
   window.addEventListener('resize', () => { renderer.resize(); draw(); });
   renderer.resize();
-
-  // ---- embedded example (shown until real events load or arrive) ------------
-
-  const EXAMPLE = [
-    { ts: 1000, agent: 'claude', session: 's-retry', kind: 'think', status: 'ok', tool: null, dur_ms: 1200, sig: 'sha256:think1' },
-    { ts: 1500, agent: 'claude', session: 's-retry', kind: 'tool', status: 'ok', tool: 'Bash', dur_ms: 1500, sig: 'sha256:git-push' },
-    { ts: 3000, agent: 'claude', session: 's-retry', kind: 'tool_fail', status: 'error', tool: 'Bash', dur_ms: 1500, sig: 'sha256:fail-git-push' },
-    { ts: 4000, agent: 'claude', session: 's-retry', kind: 'tool', status: 'ok', tool: 'Bash', dur_ms: 1500, sig: 'sha256:git-push' },
-    { ts: 5500, agent: 'claude', session: 's-retry', kind: 'tool_fail', status: 'error', tool: 'Bash', dur_ms: 1500, sig: 'sha256:fail-git-push' },
-    { ts: 7000, agent: 'claude', session: 's-retry', kind: 'tool', status: 'ok', tool: 'Write', dur_ms: 200, sig: 'sha256:write-notes' },
-  ];
 
   // ---- state ------------------------------------------------------------------
 
@@ -121,7 +124,14 @@
     overlayTime.textContent = formatMs(snap.time - t0()) + ' / ' + formatMs(span());
     btnPlay.textContent = player.playing ? '⏸ Pause' : '▶ Play';
     btnLive.classList.toggle('active', !!live);
+    // Live: measured against the wall clock, so a silent wait raises it.
+    const g = snap.eventsSoFar.length ? gaugeSnapshot(snap.eventsSoFar, { now: live ? Date.now() : snap.time }) : 0;
+    gaugeValue.textContent = g.toFixed(2);
+    gaugeFill.style.width = `${Math.round(g * 100)}%`;
+    gaugeFill.style.background = g >= 0.5 ? 'var(--bad)' : g >= 0.25 ? 'var(--warn)' : 'var(--accent)';
   }
+  // Redraw once a second while live, so the gauge moves during a silent wait.
+  setInterval(() => { if (live) draw(); }, 1000);
 
   function loop() {
     const s = player.tick(performance.now());
@@ -193,7 +203,6 @@
     },
     go_live() {
       if (live) return { live: true };
-      if (!/^https?:$/.test(location.protocol)) throw new Error('live needs the page served by the daemon (turbella open)');
       show([], 'live · waiting for events…');
       live = new EventSource('/events');
       live.onmessage = (e) => {
@@ -229,7 +238,7 @@
   // ---- the human door: controls call the same tools -------------------------
 
   btnPlay.addEventListener('click', () => (player.playing ? TOOLS.pause() : TOOLS.play()));
-  btnLive.addEventListener('click', () => { try { TOOLS.go_live(); } catch (e) { status.textContent = e.message; } });
+  btnLive.addEventListener('click', () => TOOLS.go_live());
   selSpeed.addEventListener('change', () => TOOLS.set_speed({ speed: Number(selSpeed.value) }));
   scrub.addEventListener('input', () => TOOLS.seek({ fraction: Number(scrub.value) / 100 }));
   fileInput.addEventListener('change', () => {
@@ -242,9 +251,8 @@
       .catch(() => { status.textContent = 'read failed'; });
   });
 
-  // Served by the daemon: follow it live. Opened as a file: show the example.
-  if (/^https?:$/.test(location.protocol)) TOOLS.go_live();
-  else show(EXAMPLE, 'example session · load a transcript to replay it');
+  // The page is served by the daemon, so it starts by following it live.
+  TOOLS.go_live();
 </script>
 </body>
 </html>

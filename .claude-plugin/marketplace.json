@@ -1,0 +1,14 @@
+{
+  "name": "turbella",
+  "description": "Turbella, a live view of what a coding agent is doing.",
+  "owner": {
+    "name": "NakliTechie"
+  },
+  "plugins": [
+    {
+      "name": "turbella",
+      "source": "./",
+      "description": "Shows an agent's tool calls, failures, permission waits and thinking live in a local page, with a gauge for when it is stuck."
+    }
+  ]
+}

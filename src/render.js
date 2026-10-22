@@ -54,13 +54,6 @@ function colorFor(event) {
   return '#94a3b8';
 }
 
-function hueForTool(tool) {
-  // Stable hue per tool name so the same tool looks the same everywhere.
-  let h = 0;
-  for (let i = 0; i < (tool || '').length; i++) h = (h * 31 + (tool || '').charCodeAt(i)) % 360;
-  return `hsl(${h}, 65%, 55%)`;
-}
-
 // Returns true if this event's `sig` has appeared at least twice among the
 // arrived events within `windowMs` — a stuck-on-repeat signal.
 function loopSig(eventsSoFar, event, windowMs = 60 * 1000) {
@@ -71,13 +64,6 @@ function loopSig(eventsSoFar, event, windowMs = 60 * 1000) {
     if (e.sig === event.sig && e.kind === 'tool_fail' && e.ts >= cut) n++;
   }
   return n >= 2;
-}
-
-function formatMs(ms) {
-  const s = Math.max(0, Math.round(ms / 1000));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return m ? `${m}:${String(r).padStart(2, '0')}` : `${r}s`;
 }
 
 export function createRenderer(canvas, opts = {}) {
@@ -95,11 +81,25 @@ export function createRenderer(canvas, opts = {}) {
   let width = canvas.width;
   let height = canvas.height;
 
+  // Draw in CSS pixels on a backing store scaled to the screen, so text and
+  // marks stay sharp on high-density displays.
   function resize() {
+    const dpr = globalThis.devicePixelRatio || 1;
     width = canvas.clientWidth;
     height = canvas.clientHeight;
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  // Lanes are at most MAX_LANE tall and the block sits centred, so one agent
+  // reads as one band instead of a page of empty space.
+  const MAX_LANE = opts.maxLane ?? 120;
+  function lanes() {
+    const avail = height - topPad - bottomPad;
+    const n = Math.max(agents.length, 1);
+    const laneH = Math.min(avail / n, MAX_LANE);
+    return { laneH, y0: topPad + (avail - laneH * n) / 2, n };
   }
 
   function feed({ eventsSoFar: es, time }, allEvents) {
@@ -123,10 +123,9 @@ export function createRenderer(canvas, opts = {}) {
 
   function laneY(agent) {
     const i = agents.indexOf(agent);
+    const { laneH, y0 } = lanes();
     if (i === -1) return height / 2;
-    const n = Math.max(agents.length, 1);
-    const laneH = (height - topPad - bottomPad) / n;
-    return topPad + i * laneH + laneH / 2;
+    return y0 + i * laneH + laneH / 2;
   }
 
   function laneLabelX() { return sidePad - 10; }
@@ -146,17 +145,18 @@ export function createRenderer(canvas, opts = {}) {
 
     // agent lane labels (left) + separators
     ctx.textAlign = 'right';
-    for (let i = 0; i < agents.length; i++) {
-      const n = agents.length;
-      const laneH = (height - topPad - bottomPad) / n;
-      const cy = topPad + i * laneH + laneH / 2;
-      ctx.fillStyle = '#475569';
-      ctx.fillText(agents[i], laneLabelX(), cy + 4);
-      ctx.strokeStyle = '#e2e8f0';
+    const { laneH, y0, n } = lanes();
+    for (let i = 0; i <= n; i++) {
+      ctx.strokeStyle = '#e5e5e2';
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(sidePad, topPad + i * laneH);
-      ctx.lineTo(width - sidePad, topPad + i * laneH);
+      ctx.moveTo(sidePad, y0 + i * laneH);
+      ctx.lineTo(width - sidePad, y0 + i * laneH);
       ctx.stroke();
+      if (i < agents.length) {
+        ctx.fillStyle = '#6b6b66';
+        ctx.fillText(agents[i], laneLabelX(), y0 + i * laneH + laneH / 2 + 4);
+      }
     }
 
     // draw arrived events
@@ -218,29 +218,24 @@ export function createRenderer(canvas, opts = {}) {
         ctx.closePath();
         ctx.fill();
       } else {
-        // tool tick — hue by tool kind
-        ctx.fillStyle = hueForTool(e.tool);
-        ctx.fillRect(cx - 2, cy - 6, 4, 12);
+        // tool tick, coloured by tool; a call still running is drawn faint
+        ctx.fillStyle = c;
+        ctx.globalAlpha = e.status === 'waiting' ? 0.3 : 1;
+        ctx.fillRect(cx - 2, cy - 8, 4, 16);
+        ctx.globalAlpha = 1;
       }
     }
 
-    // playhead line
+    // playhead line, across the lanes only
     const px = xFor(playhead);
-    ctx.strokeStyle = '#111827';
-    ctx.setLineDash([6, 4]);
+    ctx.strokeStyle = '#1c1c1a';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
     ctx.beginPath();
-    ctx.moveTo(px, topPad);
-    ctx.lineTo(px, height - bottomPad);
+    ctx.moveTo(px, y0 - 8);
+    ctx.lineTo(px, y0 + n * laneH + 8);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = '#111827';
-    ctx.fillRect(px - 2, height - bottomPad + 2, 4, 6);
-
-    // time readout
-    ctx.fillStyle = '#111827';
-    ctx.font = '12px system-ui, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(formatMs(playhead - tMin) + ' / ' + formatMs(tMax - tMin), sidePad, height - 8);
   }
 
   return { resize, feed, draw };

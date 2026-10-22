@@ -254,6 +254,20 @@ async function main() {
   if (ss) { try { process.kill(ss.pid); } catch {} await sleep(200); }
   try { unlinkSync('/tmp/turbella-hook.sock'); } catch {}
   try { unlinkSync('/tmp/turbella-hook.sock.state'); } catch {}
+
+  // The hook forwards only what the daemon hashes: a bare socket stands in for
+  // the daemon and records the raw line.
+  const { createServer: createRawServer } = await import('node:net');
+  let rawLine = '';
+  const raw = createRawServer((s) => s.on('data', (d) => { rawLine += d; }));
+  await new Promise((r) => raw.listen('/tmp/turbella-hook.sock', r));
+  runHook({ hook_event_name: 'PostToolUse', session_id: 's-priv', tool_name: 'Read',
+    tool_input: { file_path: 'a.txt' }, tool_response: { content: 'SECRET-FILE-BODY' }, transcript_path: '/x' });
+  await sleep(100);
+  await new Promise((r) => raw.close(r));
+  check('hook forwarded a line', rawLine.includes('"Read"'), true);
+  check('hook never forwards tool output', rawLine.includes('SECRET-FILE-BODY'), false);
+  try { unlinkSync('/tmp/turbella-hook.sock'); } catch {}
   delete process.env.TURBELLA_SOCK;
 
   // ---- emit + status CLI -----------------------------------------------------
