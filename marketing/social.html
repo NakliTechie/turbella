@@ -2,23 +2,23 @@
 <html lang="en">
 <meta charset="utf-8">
 <title>Turbella social card</title>
-<!-- 1280×640 repo card; marketing/capture.mjs renders it with viz.jpg beside it. -->
+<!-- 1280×640 repo card; marketing/capture.mjs renders it with windows.jpg (from desk.mjs) beside it. -->
 <style>
-  html, body { margin: 0; width: 1280px; height: 640px; overflow: hidden; background: #f7f7f5;
-    font-family: system-ui, -apple-system, sans-serif; color: #1c1c1a; }
+  html, body { margin: 0; width: 1280px; height: 640px; overflow: hidden; background: #f5f6f8;
+    font-family: system-ui, -apple-system, sans-serif; color: #14161a; }
   .card { display: grid; grid-template-columns: 430px 1fr; height: 100%; }
   .words { padding: 150px 0 0 64px; }
   h1 { font-size: 64px; margin: 0 0 24px; letter-spacing: -0.01em; font-weight: 650; }
-  p { font-size: 30px; line-height: 1.3; margin: 0; color: #3a3a36; }
+  p { font-size: 30px; line-height: 1.3; margin: 0; color: rgba(20, 22, 26, 0.7); }
   .shot { position: relative; }
-  .shot img { position: absolute; left: 0; top: 150px; width: 800px; border: 1px solid #e5e5e2;
-    border-radius: 10px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08); }
+  .shot img { position: absolute; left: 0; top: 64px; width: 800px; height: 512px; object-fit: cover; object-position: right top;
+    border-radius: 12px; box-shadow: 0 10px 34px rgba(0, 0, 0, 0.18); }
 </style>
 <div class="card">
   <div class="words">
     <h1>Turbella</h1>
-    <p>See what your coding agent is doing while you wait, and when it is stuck.</p>
+    <p>See what your coding agents are doing while you wait, and when one is stuck.</p>
   </div>
-  <div class="shot"><img src="viz.jpg" alt=""></div>
+  <div class="shot"><img src="windows.jpg" alt=""></div>
 </div>
 </html>

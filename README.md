@@ -16,7 +16,7 @@
   <img alt="no dependencies" src="https://img.shields.io/badge/npm%20dependencies-0-2563eb?style=flat-square">
 </p>
 
-![The Turbella visualiser: a MilkDrop preset moving to a Claude Code session's tool calls and failures](marketing/viz.jpg)
+![Turbella on a Mac: a terminal running an agent under turbella run, with its strip on the top row, and eight floating windows down the right edge, one per agent session (claude, codex, opencode, pi, omp, hermes, dsh), each with its own picture, gauge and current action. Window frames composed in HTML around real renders.](marketing/windows.jpg)
 
 ## Install
 
@@ -32,29 +32,24 @@
 | **The `turbella` command** | in the clone, `npm link` puts it on your PATH; or run `node bin/turbella` |
 
 Start a session. The first hook starts the Turbella daemon and opens the visualiser at
-`http://127.0.0.1:7377/viz` when no Turbella page is open (`TURBELLA_OPEN=0` turns that
-off). The first event shows within 5 seconds of the first hook.
-
-No config file and no account. To replay a past session, load a Claude Code transcript from
-`~/.claude/projects/` with the timeline's **load** button; **Live** goes back to the agent.
+`http://127.0.0.1:7377/viz` when no page is open (`TURBELLA_OPEN=0` turns that off), within
+5 seconds of the first hook. No config file, no account. To replay a session, load a Claude
+Code transcript from `~/.claude/projects/` with the timeline's **load** button.
 
 ## Why
 
 You wait on an agent for minutes and learn nothing. Is it thinking, retrying the same
 failing command, or blocked on a permission prompt? Turbella shows it while it happens.
 
-Each session gets a lane, and each tool call is a tick coloured by tool. A failure is a
-red spike, and the same failure twice gets a repeat mark. A permission wait is amber; a
-violet dot is thinking, larger for longer. The **turbulence gauge** (0 to 1) adds four
-signals from the last five minutes: failures that repeat an earlier failure, repeated
-edits to one file, the same tool called over and over, and time since the last
-successful tool call. That last one rises through a silent wait and reaches its full
-share after a minute, because silence is part of being stuck.
+Each session gets a lane. Each tool call is a tick, dark for edits and grey for the rest; a
+failure is a red spike, and the same failure twice gets a repeat mark. A permission wait is
+amber; a violet dot is thinking, larger for longer. The **turbulence gauge** (0 to 1) adds
+four signals from the last five minutes: repeated failures, repeated edits to one file, the
+same tool over and over, and time since the last successful call, which rises through a
+silent wait because silence is part of being stuck. It borrows from "Fractal basins trap
+latent reasoning" (arXiv:2609.04963): stuck reasoning keeps switching between near answers.
 
-The gauge borrows from "Fractal basins trap latent reasoning" (arXiv:2609.04963): reasoning
-stuck near almost-right answers keeps switching, and the switching measures how stuck it is.
-
-## Two views
+## Views
 
 **The visualiser** (`/viz`) plays your agent like music. Every tool call is a pluck, a
 failure is a bass hit, thinking is a slow swell and a permission wait is a held note; the
@@ -63,6 +58,11 @@ another of about a hundred MilkDrop presets, run by [Butterchurn](https://github
 Nothing plays aloud. It needs WebGL 2; without it the page sends you to the timeline.
 
 **The timeline** (`/`) is the plain record: what happened, when, and how often it repeated.
+
+**Beside your agents** (macOS): `turbella overlay` opens a small always-on-top window per agent
+session, and `turbella run <agent>` pins that agent's own gauge to the terminal's top row.
+
+![A terminal under turbella run: the strip on the top row shows the gauge at 0.40 and Bash running for 7 s above failing test output](marketing/strip.png)
 
 ![The Turbella timeline: one Claude Code lane with tool ticks, three identical test failures marked as a repeat, a permission wait in amber, and the turbulence gauge at 0.49](marketing/hero.png)
 
