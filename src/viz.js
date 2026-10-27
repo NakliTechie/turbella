@@ -89,9 +89,20 @@ addEventListener('pointermove', () => {
 });
 idle = setTimeout(() => $('hud').classList.add('quiet'), 4000);
 
+// While the agent is idle the preset runs at a third of real time, so the
+// resting picture drifts; work brings it back to full speed within a second.
+const IDLE_PACE = 0.3;
+let pace = IDLE_PACE;
+let lastFrame = performance.now();
+
 nextLook(0);
 function frame() {
-  viz.render({ audioLevels: signal.frame(performance.now()) });
+  const now = performance.now();
+  const dt = Math.min(0.1, (now - lastFrame) / 1000);
+  lastFrame = now;
+  const target = signal.working || signal.running > 0 ? 1 : IDLE_PACE;
+  pace += (target - pace) * (1 - Math.exp(-3 * dt));
+  viz.render({ audioLevels: signal.frame(now), elapsedTime: dt * pace });
   requestAnimationFrame(frame);
 }
 frame();

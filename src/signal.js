@@ -15,6 +15,7 @@
 //   tool running   a steady tone from a tool's start to its end (2 minutes at most)
 //   turn open      a low working tone from a prompt until the session stops
 //   idle           a faint slow breath, so the picture never goes flat
+//                  (the page also slows the preset's clock while idle)
 //
 // frame() returns 1,024 unsigned samples per channel centred on 128, the shape
 // a browser analyser produces, so the renderer cannot tell it from audio.
@@ -45,7 +46,7 @@ export const HOLD_MAX_MS = 120_000; // a tool held longer than this fades
 export const TURN_MAX_MS = 600_000; // a turn with no event for this long counts as over
 const HOLD_AMP = 30;
 const WORK_AMP = 16;
-const IDLE_AMP = 4;
+const IDLE_AMP = 2;
 
 const callKey = (e) => `${e.session ?? ''}|${e.tool ?? ''}|${e.sig ?? ''}`;
 
@@ -115,7 +116,7 @@ export function createSignal({ random = Math.random } = {}) {
       voices = voices.filter((v) => v.amp > 0.5 || v.noise > 0.5);
       const target = turns.size ? WORK_AMP : IDLE_AMP;
       bed += (target - bed) * (1 - Math.exp(-1.5 * dt));
-      const breath = bed * (0.75 + 0.25 * Math.sin(nowMs / (turns.size ? 700 : 2200)));
+      const breath = bed * (0.75 + 0.25 * Math.sin(nowMs / (turns.size ? 700 : 4000)));
       const floor = turbulence * 35;
       const wobble = turbulence * 25;
       for (let i = 0; i < SAMPLES; i++) {
