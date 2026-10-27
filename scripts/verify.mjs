@@ -405,6 +405,24 @@ async function main() {
   check('pi/omp: turn, start, failure, start, end, stop in order', shape(piEvs), 'turn,tool*,tool_fail,tool*,tool,stop');
   check('pi/omp: lane, session, edited file hashed as target; no text', piEvs.every((e) => e.agent === 'omp' && e.session === 'pi1') && /^sha256:/.test(piEvs[1].target ?? '') && !JSON.stringify(piEvs).includes('SECRET'), true);
 
+  // dsh: a Cordis plugin fed the session log's documented event shapes.
+  daemonClear();
+  const dshOn = {};
+  const { apply: dshApply } = await import('../adapters/dsh.js');
+  dshApply({ on: (name, fn) => { dshOn[name] = fn; } });
+  const ds = { id: 'dsh1' };
+  const dev = (type, time, data) => dshOn['session/event'](ds, { type, seq: time, time, data });
+  dev('turn/start', 1000, { turn: 1 });
+  dev('tool/call', 1100, { turn: 1, step: 1, callId: 'k1', name: 'bash', arguments: '{"command":"make"}' });
+  dev('tool/result', 1400, { turn: 1, step: 1, message: { role: 'tool', toolCallId: 'k1', isError: true, content: [{ type: 'text', text: 'SECRET-ERR' }] }, error: { name: 'Exit', code: '2', reason: 'SECRET' } });
+  dev('tool/call', 1500, { turn: 1, step: 2, callId: 'k2', name: 'read', arguments: '{"path":"/a.js"}' });
+  dev('tool/result', 1550, { turn: 1, step: 2, message: { role: 'tool', toolCallId: 'k2', content: [] } });
+  dev('turn/end', 1600, { turn: 1, reason: { kind: 'done' } });
+  await sleep(300);
+  const dshEvs = (await readSSE(h.port, { count: 6 })).map((x) => x.ev);
+  check('dsh: turn, start, failure, start, end, stop in order', shape(dshEvs), 'turn,tool*,tool_fail,tool*,tool,stop');
+  check('dsh: lane, session, durations from the log; no text', dshEvs.every((e) => e.agent === 'dsh' && e.session === 'dsh1') && dshEvs[2].dur_ms === 300 && dshEvs[4].dur_ms === 50 && !JSON.stringify(dshEvs).includes('SECRET'), true);
+
   daemonClear();
   runHook({ hook_event_name: 'UserPromptSubmit', session_id: 's', prompt: 'hello' });
   await sleep(100);
