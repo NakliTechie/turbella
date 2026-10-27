@@ -9,6 +9,7 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSyn
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { readState } from './paths.js';
 import { deliver } from './socketWrite.js';
 import { contentHash } from './crypto.js';
@@ -77,18 +78,29 @@ async function open() {
   return { url, opened };
 }
 
-// The native helper (native/turbella-native.swift): built with the system
-// swiftc into ~/.turbella-native on first use, and again when the source is
-// newer than the binary.
+// The native helper (native/turbella-native.swift). The repo ships a universal
+// build (scripts/build-native.mjs) beside a hash of the source it came from; it
+// is used while that hash matches, so no swiftc is needed. Otherwise the helper
+// is built with the system swiftc into ~/.turbella-native, again whenever the
+// source is newer than that build.
 const NATIVE_SRC = fileURLToPath(new URL('../native/turbella-native.swift', import.meta.url));
+const NATIVE_SHIPPED = fileURLToPath(new URL('../native/turbella-native', import.meta.url));
 const NATIVE_DIR = join(homedir(), '.turbella-native');
 const NATIVE_BIN = join(NATIVE_DIR, 'turbella-native');
 const OVERLAY_PID = join(NATIVE_DIR, 'overlay.pid');
 
+export function shippedNativeIsCurrent() {
+  try {
+    const recorded = readFileSync(`${NATIVE_SHIPPED}.sha256`, 'utf8').split(/\s/)[0];
+    return existsSync(NATIVE_SHIPPED) && recorded === createHash('sha256').update(readFileSync(NATIVE_SRC)).digest('hex');
+  } catch { return false; }
+}
+
 function nativeHelper() {
   if (process.platform !== 'darwin') throw new Error('the overlay and run need macOS for now');
-  if (existsSync(NATIVE_BIN) && statSync(NATIVE_BIN).mtimeMs >= statSync(NATIVE_SRC).mtimeMs) return NATIVE_BIN;
   mkdirSync(NATIVE_DIR, { recursive: true });
+  if (shippedNativeIsCurrent()) return NATIVE_SHIPPED;
+  if (existsSync(NATIVE_BIN) && statSync(NATIVE_BIN).mtimeMs >= statSync(NATIVE_SRC).mtimeMs) return NATIVE_BIN;
   process.stderr.write('turbella: building the native helper with swiftc (once, about 10 s)\n');
   const tmp = `${NATIVE_BIN}.${process.pid}.tmp`;
   const r = spawnSync('swiftc', ['-O', '-swift-version', '5', '-o', tmp, NATIVE_SRC], { stdio: ['ignore', 'ignore', 'pipe'] });

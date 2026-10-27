@@ -4,12 +4,15 @@
 // event with hashes only. Starts the daemon if none runs. File bodies, prompts, tool output and notification text never
 // leave this process.
 //
-// Never fails loudly: errors are swallowed and the exit code is always 0. The
-// hooks run async (hooks/hooks.json), so a tool call never waits on this.
+// Never fails loudly: errors are swallowed and the exit code is always 0. Claude
+// Code runs these hooks async (hooks/hooks.json). Other agents wait for each hook,
+// so for them the hook hands the payload to a detached copy of itself
+// (`--send`) and exits at once; hashing and delivery happen off the agent's path.
 // SessionStart runs synchronously instead: it starts the daemon, opens the
 // page when none is open (TURBELLA_OPEN=0 turns that off), and prints the
 // page address for the person.
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { deliver } from '../src/socketWrite.js';
 import { readState } from '../src/paths.js';
 import { contentHash } from '../src/crypto.js';
@@ -43,6 +46,14 @@ process.stdin.on('end', async () => {
     const agent = detectAgent(p);
     const profile = PROFILES[agent];
     const n = normalise(p);
+    if (n.event !== 'SessionStart' && agent !== 'claude' && !process.argv.includes('--send')) {
+      const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--send', '--agent', agent],
+        { detached: true, stdio: ['pipe', 'ignore', 'ignore'], env: process.env });
+      child.on('error', () => process.exit(0));
+      child.stdin.on('error', () => {});
+      child.stdin.end(stdin, () => { child.unref(); process.exit(0); });
+      return;
+    }
     if (n.event === 'SessionStart') {
       await deliver({ kind: 'ping', transcript: n.transcript, session: n.session, run: process.env.TURBELLA_RUN ?? null });
       let st = readState();

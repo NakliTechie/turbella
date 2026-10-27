@@ -94,8 +94,19 @@ const LABEL = { tool: 'ok', tool_fail: 'failed', permission: 'waiting for permis
 // ?session=<id> shows one session only: its sound, its gauge, its status line.
 const only = new URLSearchParams(location.search).get('session');
 
-const live = new EventSource('/events');
-live.onmessage = (m) => {
+// The daemon filters the stream for a one-session window. A refused or dropped
+// stream (EventSource gives up after an error answer) is reopened every 2 s.
+let live = null;
+function connect() {
+  live = new EventSource(only ? `/events?session=${encodeURIComponent(only)}` : '/events');
+  live.onmessage = onEvent;
+  live.onerror = () => {
+    status = null;
+    $('last').textContent = 'reconnecting to the daemon…';
+    if (live.readyState === EventSource.CLOSED) setTimeout(connect, 2000);
+  };
+}
+function onEvent(m) {
   let ev;
   try { ev = JSON.parse(m.data); } catch { return; }
   if (only && ev.session !== only) return;
@@ -110,8 +121,7 @@ live.onmessage = (m) => {
   status = { text: [ev.tool, running ? 'running' : LABEL[ev.kind] ?? ev.kind].filter(Boolean).join(' · '),
     since: Date.now() };
   showStatus();
-};
-live.onerror = () => { status = null; $('last').textContent = 'reconnecting to the daemon…'; };
+}
 
 // The bottom line says what the agent is on and for how long, so a quiet
 // stretch (a long search, the model writing) still reads as work.
@@ -124,6 +134,7 @@ function showStatus() {
   $('last').textContent = status.text + tail;
 }
 setInterval(showStatus, 1000);
+connect();
 
 // All sessions together (no ?session): one line per agent session, newest
 // first, so the person sees who is doing what.

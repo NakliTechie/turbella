@@ -20,7 +20,7 @@ import { createSignal, loudness, SAMPLES } from '../src/signal.js';
 import { start, stop, readState, AlreadyRunning, __state as daemonState, __clear as daemonClear } from '../src/daemon.js';
 import { writeEvent } from '../src/socketWrite.js';
 import { MANIFEST, toolsFor } from '../src/manifest.js';
-import { HANDLERS } from '../src/tools.js';
+import { HANDLERS, shippedNativeIsCurrent } from '../src/tools.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FIX = (f) => join(ROOT, 'test', 'fixtures', f);
@@ -51,9 +51,9 @@ function killStateDaemon() {
 const runHook = (payload, env = {}) => execFileSync(process.execPath, [HOOK], { input: JSON.stringify(payload), encoding: 'utf8', env: { ...process.env, ...env } });
 
 // Read SSE events until `count` arrive or `ms` pass.
-async function readSSE(port, { count = 1, ms = 1500, headers = {} } = {}) {
+async function readSSE(port, { count = 1, ms = 1500, headers = {}, path = '/events' } = {}) {
   const ctrl = new AbortController();
-  const res = await fetch(`http://127.0.0.1:${port}/events`, { signal: ctrl.signal, headers });
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, { signal: ctrl.signal, headers });
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   const out = [];
@@ -333,6 +333,10 @@ async function main() {
   check('hermes: duration comes from extra', heEvs[1]?.dur_ms, 42);
   check('hermes: no prompt, output or error text', !JSON.stringify(heEvs).includes('SECRET'), true);
   check('hermes: session start prints nothing (stdout is a hook decision)', runHook(he('on_session_start', { platform: 'cli' })), '');
+  // Hermes waits for each hook, so the hook hands off and returns even when no daemon can be reached.
+  const t0 = Date.now();
+  runHook(he('post_tool_call', { status: 'ok' }, { tool_name: 'terminal', tool_input: { command: 'ls' } }), { TURBELLA_SOCK: '/nonexistent-turbella/x.sock' });
+  check('hermes: the hook returns in under 500 ms with no daemon reachable', Date.now() - t0 < 500, true);
 
   // Sessions and filters: one floating window per session, and `turbella run`
   // strips that show only their own agent (TURBELLA_RUN).
@@ -352,6 +356,18 @@ async function main() {
   check('filter: ?session= counts only that session', (await st('?session=other')).events, 2);
   check('filter: the gauge is per filter (failures in one session only)', byRun.gauge > (await st('?session=other')).gauge, true);
   check('filter: a filtered status lists no sessions', byRun.sessions, undefined);
+  const streamed = (await readSSE(h.port, { count: 3, ms: 800, path: '/events?session=other' })).map((x) => x.ev);
+  check('filter: /events?session= streams only that session, backlog included', streamed.length === 2 && streamed.every((e) => e.session === 'other'), true);
+
+  // A busy session stays listed past 15 minutes; a stopped one does not.
+  daemonClear();
+  const old = Date.now() - 20 * 60_000;
+  await writeEvent({ kind: 'tool', status: 'waiting', tool: 'Bash', session: 'long-call', agent: 'x', ts: old });
+  await writeEvent({ kind: 'turn', session: 'mid-turn', agent: 'x', ts: old });
+  await writeEvent({ kind: 'stop', session: 'done', agent: 'x', ts: old });
+  await sleep(100);
+  const busy = (await st()).sessions.map((x) => x.session).sort().join(',');
+  check('sessions: an open call or an unfinished turn keeps a session past 15 min; a stopped one ages out', busy, 'long-call,mid-turn');
 
   // In-process adapters, driven with each agent's documented event shapes.
   daemonClear();
@@ -462,6 +478,7 @@ async function main() {
   // ---- parity: every door matches the manifest ---------------------------------------------
   const daemonNames = toolsFor('daemon').map((x) => x.name).sort();
   check('parity: one CLI/MCP handler per daemon tool, no extras', JSON.stringify(Object.keys(HANDLERS).sort()), JSON.stringify(daemonNames));
+  check('native: the shipped helper was built from the current Swift source (npm run build:native)', shippedNativeIsCurrent(), true);
   check('parity: every manifest entry states personOnly', MANIFEST.every((x) => typeof x.personOnly === 'boolean'), true);
   const html = readFileSync(join(ROOT, 'web', 'turbella.html'), 'utf8');
   const controls = [...html.matchAll(/<(button|select|input)\b[^>]*>/g)].map((m) => m[0]);

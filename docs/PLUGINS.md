@@ -82,11 +82,14 @@ The daemon serves these only on `127.0.0.1` (port 7377 unless taken; the address
 
 - `GET /events` streams every event as server-sent events: `id: <n>` then
   `data: <event JSON>`. On connect it first sends what it holds (up to 10,000 events);
-  send `Last-Event-ID` to get only newer ones.
+  send `Last-Event-ID` to get only newer ones. `?session=`, `?run=` and `?agent=` limit
+  the stream, backlog included. The daemon serves up to 64 streams and answers more with
+  503; a reader should retry after a pause.
 - `GET /status` returns `{schema, events, byKind, gauge, sockPath, pages, sessions}`.
   `gauge` is the turbulence from 0 (calm) to 1 (stuck) over the last 5 minutes.
-  `sessions` lists sessions with an event in the last 15 minutes, newest first:
-  `{session, agent, run, events, last, stopped}`.
+  `sessions` lists active sessions, newest first: `{session, agent, run, events, last,
+  stopped, open}`. A session is active for 15 minutes after its last event, and for up to
+  2 hours while it has not stopped or has tool calls open (`open` counts them).
 - `GET /status?session=<id>` (or `?run=`, `?agent=`, combined with `&`) counts and
   measures only the matching events, and leaves out `sessions`.
 - `GET /viz?session=<id>` is the visualiser for one session; the floating windows use it.

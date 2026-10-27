@@ -306,7 +306,7 @@ final class Feed: NSObject, URLSessionDataDelegate {
   var statusTimer: DispatchSourceTimer?
 
   func connect() {
-    var req = URLRequest(url: URL(string: base + "/events")!)
+    var req = URLRequest(url: URL(string: base + "/events?run=" + run)!)
     req.timeoutInterval = 3600 * 24
     session.dataTask(with: req).resume()
   }
@@ -514,39 +514,49 @@ final class Wrapper {
 
   // MARK: keyboard and reports: shift rows up one
 
-  func fromTerminal(_ bytes: ArraySlice<UInt8>) -> [UInt8] {
-    let s = String(decoding: bytes, as: UTF8.self)
-    guard s.contains("\u{1b}[") else { return Array(bytes) }
-    var out = ""
-    var rest = Substring(s)
-    // Cursor position reports, only when the agent asked: ESC [ row ; col R
-    // (unrequested, the same bytes are a modified F3 key). SGR mouse:
-    // ESC [ < b ; x ; y M|m, dropped when it lands on the strip.
-    while let r = rest.range(of: "\u{1b}[") {
-      out += rest[..<r.lowerBound]
-      var tail = rest[r.upperBound...]
-      let isMouse = tail.first == "<"
-      if isMouse { tail = tail.dropFirst() }
-      let end = tail.firstIndex { !("0123456789;".contains($0)) }
-      if let end, let fin = tail[end...].first {
-        let nums = tail[..<end].split(separator: ";", omittingEmptySubsequences: false).map { Int($0) }
-        if !isMouse && fin == "R" && nums.count == 2 && cprWanted > 0, let row = nums[0], let col = nums[1] {
-          cprWanted -= 1
-          out += "\u{1b}[\(max(1, row - 1));\(col)R"
-          rest = tail[tail.index(after: end)...]
-          continue
-        }
-        if isMouse && (fin == "M" || fin == "m") && nums.count == 3, let b = nums[0], let x = nums[1], let y = nums[2] {
-          if y > 1 { out += "\u{1b}[<\(b);\(x);\(y - 1)\(fin)" }
-          rest = tail[tail.index(after: end)...]
-          continue
-        }
+  var pendingIn: [UInt8] = []  // a report cut off at the end of the last read
+
+  // Bytes from the terminal: keys, pastes and the terminal's reports. It works
+  // on bytes, so a character split across reads passes through intact. A report
+  // cut off at the end of a read (ESC, or ESC [ with digits so far) waits for
+  // the next read; the loop sends it on as it is if nothing follows in 30 ms.
+  // Cursor position reports are shifted only when the agent asked for one: ESC [
+  // row ; col R (unrequested, the same bytes are a modified F3 key). SGR mouse
+  // reports, ESC [ < b ; x ; y M|m, are shifted, or dropped when on the strip.
+  func fromTerminal(_ chunk: ArraySlice<UInt8>) -> [UInt8] {
+    let b = pendingIn + chunk
+    pendingIn = []
+    var out: [UInt8] = []
+    out.reserveCapacity(b.count)
+    var i = 0
+    while i < b.count {
+      if b[i] != 0x1B { out.append(b[i]); i += 1; continue }
+      var j = i + 1
+      if j >= b.count { pendingIn = Array(b[i...]); break }
+      if b[j] != 0x5B { out.append(b[i]); i += 1; continue }
+      j += 1
+      let mouse = j < b.count && b[j] == 0x3C
+      if mouse { j += 1 }
+      let digits = j
+      while j < b.count, (0x30...0x39).contains(b[j]) || b[j] == 0x3B { j += 1 }
+      if j >= b.count {
+        if b.count - i <= 64 { pendingIn = Array(b[i...]) } else { out += b[i...] }
+        break
       }
-      out += "\u{1b}["
-      rest = rest[r.upperBound...]
+      let fin = b[j]
+      let nums = String(decoding: b[digits..<j], as: UTF8.self)
+        .split(separator: ";", omittingEmptySubsequences: false).map { Int($0) }
+      if !mouse && fin == 0x52 && nums.count == 2 && cprWanted > 0, let row = nums[0], let col = nums[1] {
+        cprWanted -= 1
+        out += Array("\u{1b}[\(max(1, row - 1));\(col)R".utf8)
+      } else if mouse && (fin == 0x4D || fin == 0x6D) && nums.count == 3, let btn = nums[0], let x = nums[1], let y = nums[2] {
+        if y > 1 { out += Array("\u{1b}[<\(btn);\(x);\(y - 1)".utf8) + [fin] }
+      } else {
+        out += b[i...j]
+      }
+      i = j + 1
     }
-    out += rest
-    return Array(out.utf8)
+    return out
   }
 
   // MARK: the strip
@@ -627,8 +637,10 @@ func runWrapped(port: Int, command: [String]) -> Int32 {
       }
     }
     fds[0].revents = 0; fds[1].revents = 0
-    let n = poll(&fds, 2, 250)
+    let n = poll(&fds, 2, w.pendingIn.isEmpty ? 250 : 30)
     if n < 0 && errno != EINTR { break }
+    // A cut-off sequence with nothing after it was a key (Esc), not a report.
+    if n == 0 && !w.pendingIn.isEmpty { Wrapper.put(master, w.pendingIn); w.pendingIn = [] }
     if fds[1].revents != 0 {
       let r = read(master, &buf, buf.count)
       if r <= 0 { break loop }

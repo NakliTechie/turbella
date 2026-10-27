@@ -41,7 +41,7 @@ const WEB = join(SRC, '..', 'web');
 const PORT = Number(process.env.TURBELLA_PORT ?? 7377);
 const IDLE_DEFAULT_MS = 10 * 60_000;
 const MAX_EVENTS = 10_000;     // newest kept; the gauge looks at 5 minutes
-const MAX_CLIENTS = 16;
+const MAX_CLIENTS = 64;     // pages, floating windows and terminal strips each hold one stream
 const MAX_LINE = 1024 * 1024;
 const MAX_QUEUED = 1024 * 1024; // bytes a slow page may fall behind before it is dropped
 const OWNER_CHECK_MS = 5000;
@@ -49,7 +49,7 @@ const OWNER_CHECK_MS = 5000;
 let events = [];   // { id, ev }
 let nextId = 1;
 let totals = { events: 0, byKind: {} };
-const clients = new Set();
+const clients = new Map();   // stream response -> its filter ({session, run, agent})
 const sockConns = new Set();
 let sockServer = null;
 let httpServer = null;
@@ -84,7 +84,7 @@ function push(ev) {
   totals.events++;
   totals.byKind[ev.kind] = (totals.byKind[ev.kind] || 0) + 1;
   resetIdle();
-  for (const c of clients) send(c, id, ev);
+  for (const [c, f] of clients) if (matches(f, ev)) send(c, id, ev);
 }
 
 // One socket line: a hook envelope ({type, ...}), a plain event, or a ping.
@@ -141,15 +141,23 @@ function handleSocket(socket) {
   socket.on('error', () => socket.destroy());
 }
 
+// ?session=, ?run= and ?agent= on /events and /status: only matching events.
+const FILTER_KEYS = ['session', 'run', 'agent'];
+function parseFilter(url) {
+  const q = new URL(url ?? '/', 'http://x').searchParams;
+  return Object.fromEntries(FILTER_KEYS.filter((k) => q.get(k)).map((k) => [k, q.get(k)]));
+}
+const matches = (filter, ev) => FILTER_KEYS.every((k) => filter[k] === undefined || ev[k] === filter[k]);
+
 const ACTIVE_MS = 15 * 60_000; // a session with an event this recent is listed as active
 
 // Daemon status. With a filter ({session, run, agent}), the counts and the
 // gauge cover only the matching events; without one, it also lists the
 // sessions active in the last 15 minutes.
 function status(filter = {}) {
-  const keys = ['session', 'run', 'agent'].filter((k) => typeof filter[k] === 'string' && filter[k]);
+  const keys = Object.keys(filter);
   const all = events.map((e) => e.ev);
-  const recent = keys.length ? all.filter((ev) => keys.every((k) => ev[k] === filter[k])) : all;
+  const recent = keys.length ? all.filter((ev) => matches(filter, ev)) : all;
   const byKind = {};
   if (keys.length) for (const ev of recent) byKind[ev.kind] = (byKind[ev.kind] || 0) + 1;
   const out = {
@@ -165,19 +173,30 @@ function status(filter = {}) {
   return out;
 }
 
+// A session is active for 15 minutes after its last event, and longer while it
+// is mid-turn (no stop yet) or has a tool call open, so a long command or a
+// permission wait keeps its window; 2 hours is the ceiling for an agent that
+// died without a stop.
+const BUSY_MS = 2 * 60 * 60_000;
 function activeSessions(all) {
   const now = Date.now();
   const seen = new Map();
   for (const ev of all) {
-    if (!ev.session || now - ev.ts > ACTIVE_MS) continue;
-    const s = seen.get(ev.session) ?? { session: ev.session, agent: ev.agent, run: ev.run, events: 0, last: 0, stopped: false };
+    if (!ev.session || now - ev.ts > BUSY_MS) continue;
+    const s = seen.get(ev.session) ?? { session: ev.session, agent: ev.agent, run: ev.run, events: 0, last: 0, stopped: false, open: new Set() };
     s.events++;
-    s.last = Math.max(s.last, ev.ts);
-    if (ev.ts >= s.last) s.stopped = ev.kind === 'stop';
+    if (ev.ts >= s.last) { s.last = ev.ts; s.stopped = ev.kind === 'stop'; }
+    const call = `${ev.tool}|${ev.sig}`;
+    if (ev.kind === 'tool' && ev.status === 'waiting') s.open.add(call);
+    else if (ev.kind === 'tool' || ev.kind === 'tool_fail') s.open.delete(call);
+    else if (ev.kind === 'stop') s.open.clear();
     if (ev.run) s.run = ev.run;
     seen.set(ev.session, s);
   }
-  return [...seen.values()].sort((a, b) => b.last - a.last).slice(0, 32);
+  return [...seen.values()]
+    .filter((s) => now - s.last < ACTIVE_MS || !s.stopped || s.open.size > 0)
+    .sort((a, b) => b.last - a.last).slice(0, 32)
+    .map(({ open, ...s }) => ({ ...s, open: open.size }));
 }
 
 async function handleHttp(req, res) {
@@ -196,15 +215,16 @@ async function handleHttp(req, res) {
     // An id from an earlier daemon (larger than any here) gets everything.
     const last = Number(req.headers['last-event-id']) || 0;
     const from = last < nextId ? last : 0;
-    for (const { id, ev } of events) if (id > from) send(res, id, ev);
-    clients.add(res);
+    const filter = parseFilter(req.url);
+    for (const { id, ev } of events) if (id > from && matches(filter, ev)) send(res, id, ev);
+    clients.set(res, filter);
     req.on('close', () => clients.delete(res));
     resetIdle();
     return;
   }
   if (path === '/status') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(status(Object.fromEntries(new URL(req.url, 'http://x').searchParams))));
+    res.end(JSON.stringify(status(parseFilter(req.url))));
     return;
   }
   const page = { '/': 'turbella.html', '/index.html': 'turbella.html', '/viz': 'viz.html' }[path];
@@ -301,7 +321,7 @@ export function stop() {
     try { unlinkSync(sockPath()); } catch {}
     try { unlinkSync(stateFile()); } catch {}
   }
-  for (const c of clients) c.destroy();
+  for (const c of clients.keys()) c.destroy();
   clients.clear();
   for (const s of sockConns) s.destroy();
   sockConns.clear();

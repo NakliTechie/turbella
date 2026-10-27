@@ -12,7 +12,9 @@
   },
   "scripts": {
     "verify": "node scripts/verify.mjs",
-    "ttfv": "node scripts/ttfv.mjs"
+    "ttfv": "node scripts/ttfv.mjs",
+    "strip": "node scripts/strip-check.mjs",
+    "build:native": "node scripts/build-native.mjs"
   },
   "license": "MIT",
   "repository": {
