@@ -12,7 +12,7 @@ import { chmodSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gaugeSnapshot } from './gauge.js';
-import { toEvent } from './event.js';
+import { toEvent, SCHEMA } from './event.js';
 import { sockPath, stateFile, readState } from './paths.js';
 import { createTailer } from './tailer.js';
 import { FAILS_BY_MISSING_END } from './agents.js';
@@ -144,6 +144,7 @@ function handleSocket(socket) {
 function status() {
   const recent = events.map((e) => e.ev);
   return {
+    schema: SCHEMA,
     events: totals.events,
     byKind: totals.byKind,
     gauge: Math.round(gaugeSnapshot(recent, { now: Date.now() }) * 1000) / 1000,

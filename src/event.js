@@ -15,6 +15,11 @@
 
 import { contentHash } from './crypto.js';
 
+// The version of this record and of the socket and HTTP contract in
+// docs/PLUGINS.md. /status reports it; a change that breaks an adapter or a
+// reader raises it.
+export const SCHEMA = 1;
+
 export const KIND = Object.freeze({
   TOOL: 'tool',
   TOOL_FAIL: 'tool_fail',

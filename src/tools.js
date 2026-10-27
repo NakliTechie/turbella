@@ -39,13 +39,13 @@ async function status() {
   return res.json();
 }
 
-async function emit({ kind = 'tool', status: evStatus = 'ok', tool = null, session = null, payload } = {}) {
+async function emit({ kind = 'tool', status: evStatus = 'ok', tool = null, session = null, agent = 'emit', payload } = {}) {
   const event = {
     kind, status: evStatus, tool, session,
     dur_ms: null,
     sig: payload === undefined ? null : await contentHash(payload),
     ts: Date.now(),
-    agent: 'emit',
+    agent,
   };
   return { delivered: await deliver(event) };
 }
@@ -141,6 +141,14 @@ const REPO = fileURLToPath(new URL('..', import.meta.url));
 const CURSOR_EVENTS = ['sessionStart', 'beforeSubmitPrompt', 'postToolUse', 'postToolUseFailure',
   'afterAgentThought', 'subagentStop', 'stop', 'preCompact'];
 
+// Hermes events Turbella listens to; Hermes runs each hook and waits for it,
+// so the timeout is short. Printed rather than written: config.yaml is YAML and
+// Turbella has no YAML writer.
+const HERMES_EVENTS = ['on_session_start', 'pre_llm_call', 'pre_tool_call', 'post_tool_call',
+  'pre_approval_request', 'subagent_start', 'subagent_stop', 'on_session_end'];
+const hermesHooks = () => ['hooks:', ...HERMES_EVENTS.flatMap((ev) =>
+  [`  ${ev}:`, `    - command: "${HOOK} --agent hermes"`, '      timeout: 5'])].join('\n');
+
 async function install({ agent }) {
   if (agent === 'cursor') {
     const dir = join(homedir(), '.cursor');
@@ -168,8 +176,9 @@ async function install({ agent }) {
     claude: [`claude plugin marketplace add ${REPO}`, 'claude plugin install turbella@turbella'],
     codex: [`codex plugin marketplace add ${REPO}`, 'codex plugin add turbella@turbella', 'then run /hooks in Codex and trust the Turbella hooks'],
     copilot: ['copilot plugin install NakliTechie/turbella'],
+    hermes: [`add to ~/.hermes/config.yaml:\n${hermesHooks()}`, 'then start hermes once in a terminal and approve the hooks (or pass --accept-hooks)'],
   }[agent];
-  if (!steps) throw new Error('agent must be one of claude, codex, copilot, cursor');
+  if (!steps) throw new Error('agent must be one of claude, codex, copilot, cursor, hermes');
   return { agent, run: steps };
 }
 

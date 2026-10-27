@@ -37,6 +37,7 @@ export const MANIFEST = Object.freeze([
         status: { type: 'string', description: 'ok, error, waiting or denied.' },
         tool: { type: 'string' },
         session: { type: 'string' },
+        agent: { type: 'string', description: 'Your agent or app name; it becomes the lane. Defaults to "emit".' },
         payload: { description: 'Hashed into the event signature; the text itself is dropped.' },
       },
       additionalProperties: false,
@@ -75,10 +76,10 @@ export const MANIFEST = Object.freeze([
 
   {
     name: 'install', place: 'daemon', effect: 'config', personOnly: true,
-    description: "Set Turbella up for an agent. For Cursor it adds Turbella's hooks to ~/.cursor/hooks.json; for Claude Code, Codex and Copilot it prints the plugin commands to run. Person-only: it changes the person's own tool settings, so it is on the CLI and not offered to agents over MCP.",
+    description: "Set Turbella up for an agent. For Cursor it adds Turbella's hooks to ~/.cursor/hooks.json; for Claude Code, Codex and Copilot it prints the plugin commands to run; for Hermes it prints the config.yaml hooks block. Person-only: it changes the person's own tool settings, so it is on the CLI and not offered to agents over MCP.",
     inputSchema: {
       type: 'object',
-      properties: { agent: { type: 'string', enum: ['claude', 'codex', 'copilot', 'cursor'] } },
+      properties: { agent: { type: 'string', enum: ['claude', 'codex', 'copilot', 'cursor', 'hermes'] } },
       required: ['agent'],
       additionalProperties: false,
     },

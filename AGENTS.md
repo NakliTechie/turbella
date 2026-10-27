@@ -13,6 +13,7 @@ happen, with a gauge for when the agent is stuck. `README.md` covers use.
   (terminal strip); built with the system swiftc into `~/.turbella-native` on first use.
 - `src/daemon.js` — receives events on a Unix socket; serves the page and its stream on 127.0.0.1.
 - `src/event.js` — the event record and the only place events are built from input.
+- `docs/PLUGINS.md` — the contract for other apps (schema 1); change it with the record.
 - `src/transcript.js`, `src/reader.js` — Claude Code transcripts to events, for replay.
 - `src/gauge.js` — the turbulence gauge; `src/tailer.js` — thinking time from live transcripts.
 - `src/manifest.js` — every command, declared once; `src/tools.js` — their handlers.

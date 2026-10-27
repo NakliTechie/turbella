@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Agent hook for Claude Code, Codex, Copilot and Cursor (src/agents.js): reads one
+// Agent hook for Claude Code, Codex, Copilot, Cursor and Hermes (src/agents.js): reads one
 // hook payload from stdin, hashes what names the call, and sends the daemon an
 // event with hashes only. Starts the daemon if none runs. File bodies, prompts, tool output and notification text never
 // leave this process.

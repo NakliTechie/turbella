@@ -6,6 +6,8 @@
 //            requests (camelCase); shell results end with "exit code N"
 //   cursor   Cursor: camelCase events, snake_case fields, a failure event and a
 //            thinking-time event; installed into ~/.cursor/hooks.json
+//   hermes   Hermes Agent shell hooks: snake_case events, per-event fields in
+//            `extra`; a tool's end carries status ok, error or blocked
 //
 // normalise() turns any of them into one shape; each profile then says which
 // calls failed and what error text to hash. Only names, ids, durations and
@@ -19,6 +21,10 @@ const EVENT = {
   preCompact: 'PreCompact', stop: 'Stop', agentStop: 'Stop', errorOccurred: 'StopFailure',
   userPromptSubmitted: 'UserPromptSubmit', beforeSubmitPrompt: 'UserPromptSubmit',
   afterAgentThought: 'AgentThought',
+  // Hermes; pre_llm_call fires once per user message, on_session_end once per turn
+  on_session_start: 'SessionStart', pre_llm_call: 'UserPromptSubmit', pre_tool_call: 'PreToolUse',
+  post_tool_call: 'PostToolUse', pre_approval_request: 'PermissionRequest',
+  subagent_start: 'SubagentStart', subagent_stop: 'SubagentStop', on_session_end: 'Stop',
 };
 
 const EXIT_CODE = /exit code:? (-?\d+)/i;
@@ -29,16 +35,18 @@ const exitCode = (text) => {
 
 export function normalise(p) {
   const raw = p.hook_event_name ?? p.hookName ?? null;
+  const x = p.extra && typeof p.extra === 'object' ? p.extra : {};
   return {
     event: EVENT[raw] ?? raw,
     session: p.session_id ?? p.sessionId ?? p.conversation_id ?? null,
     tool: p.tool_name ?? p.toolName ?? null,
-    input: p.tool_input ?? p.toolInput ?? p.toolArgs,
+    input: p.tool_input ?? p.toolInput ?? p.toolArgs ?? p.args,
     result: p.tool_response ?? p.tool_result ?? p.toolResult ?? p.tool_output,
-    error: p.error_message ?? p.error,
+    error: p.error_message ?? p.error ?? x.error_message,
+    status: x.status ?? null,
     transcript: p.transcript_path ?? p.transcriptPath ?? null,
-    call: p.tool_use_id ?? p.toolUseId ?? null,
-    durMs: Number.isFinite(p.duration_ms) ? p.duration_ms : Number.isFinite(p.duration) ? p.duration : null,
+    call: p.tool_use_id ?? p.toolUseId ?? x.tool_call_id ?? null,
+    durMs: [p.duration_ms, p.duration, x.duration_ms].find(Number.isFinite) ?? null,
   };
 }
 
@@ -71,6 +79,13 @@ export const PROFILES = {
     errorText: errorOf,
     greeting: () => '',
   },
+  hermes: {
+    // A blocked call never ran, so it counts as failed like an error.
+    failed: (n) => n.event === 'PostToolUse' && (n.status === 'error' || n.status === 'blocked'),
+    errorText: (n) => n.error ?? n.status,
+    // Hermes reads stdout as a hook decision; print nothing.
+    greeting: () => '',
+  },
 };
 
 // Agents with no failure event for some calls: a tool start that never gets
@@ -87,6 +102,7 @@ export function detectAgent(p, { env = process.env, argv = process.argv } = {}) 
   if (/[/\\]\.codex[/\\]/.test(transcript)) return 'codex';
   if (/[/\\]\.copilot[/\\]/.test(transcript) || p?.hookName) return 'copilot';
   if (p?.cursor_version || p?.conversation_id) return 'cursor';
+  if (p?.extra && typeof p.hook_event_name === 'string' && /^[a-z]+(_[a-z]+)+$/.test(p.hook_event_name)) return 'hermes';
   // Copilot stamps every payload and omits the transcript on tool events;
   // Claude Code always sends a transcript path.
   if (!transcript && p?.timestamp != null) return 'copilot';

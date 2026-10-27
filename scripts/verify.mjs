@@ -315,6 +315,23 @@ async function main() {
   check('cursor: thinking time comes through, its text does not', cuEvs[3]?.dur_ms === 4200 && !JSON.stringify(cuEvs).includes('SECRET'), true);
   check('cursor: session start prints nothing', runHook(cu({ hook_event_name: 'sessionStart', session_id: 'u' })), '');
 
+  // Hermes shell-hook payloads, in the wire shape agent/shell_hooks.py documents.
+  daemonClear();
+  const he = (event, extra = {}, top = {}) => ({ hook_event_name: event, session_id: 'hs', cwd: '/w', extra, ...top });
+  runHook(he('pre_llm_call', { user_message: 'SECRET', is_first_turn: true }));
+  runHook(he('post_tool_call', { status: 'ok', duration_ms: 42, tool_call_id: 'c1', result: 'SECRET-OUT' }, { tool_name: 'terminal', tool_input: { command: 'ls' } }));
+  runHook(he('post_tool_call', { status: 'error', error_message: 'SECRET-ERR', duration_ms: 7, tool_call_id: 'c2' }, { tool_name: 'terminal', tool_input: { command: 'make' } }));
+  runHook(he('post_tool_call', { status: 'blocked', tool_call_id: 'c3' }, { tool_name: 'terminal', tool_input: { command: 'rm' } }));
+  runHook(he('pre_approval_request', { command: 'rm -rf x' }));
+  runHook(he('on_session_end', { completed: true }));
+  await sleep(150);
+  const heEvs = (await readSSE(h.port, { count: 6 })).map((x) => x.ev);
+  check('hermes: events get the hermes lane', heEvs.length === 6 && heEvs.every((e) => e.agent === 'hermes'), true);
+  check('hermes: kinds map (turn, tool, failure, blocked, permission, stop)', heEvs.map((e) => e.kind).join(','), 'turn,tool,tool_fail,tool_fail,permission,stop');
+  check('hermes: duration comes from extra', heEvs[1]?.dur_ms, 42);
+  check('hermes: no prompt, output or error text', !JSON.stringify(heEvs).includes('SECRET'), true);
+  check('hermes: session start prints nothing (stdout is a hook decision)', runHook(he('on_session_start', { platform: 'cli' })), '');
+
   daemonClear();
   runHook({ hook_event_name: 'UserPromptSubmit', session_id: 's', prompt: 'hello' });
   await sleep(100);
@@ -354,6 +371,11 @@ async function main() {
   const status = JSON.parse(execFileSync(process.execPath, [BIN, 'status'], { encoding: 'utf8' }));
   check('cli: emit started a daemon and status sees the event', status.events, 1);
   check('cli: status reports the gauge', typeof status.gauge, 'number');
+  check('cli: status reports the contract schema (docs/PLUGINS.md)', status.schema, 1);
+  execFileSync(process.execPath, [BIN, 'emit', '--agent', 'myagent', '--kind', 'tool_fail', '--status', 'error', '--tool', 'terminal', '--payload', 'exit 2']);
+  await sleep(100);
+  const emitted = (await readSSE(readState().port, { count: 2 })).map((x) => x.ev);
+  check('cli: emit --agent sets the lane; the default lane is emit', emitted.map((e) => e.agent).join(','), 'emit,myagent');
   const rep = JSON.parse(execFileSync(process.execPath, [BIN, 'replay', FIX('claude-retry-loop.jsonl')], { encoding: 'utf8' }));
   check('cli: replay counts the fixture failures', rep.byKind.tool_fail, 2);
   check('cli: replay output carries no transcript text', /git push|failed to push/.test(JSON.stringify(rep)), false);
@@ -377,6 +399,7 @@ async function main() {
   check('install: never touches a permission hook', 'preToolUse' in written.hooks, false);
   check('install: a second run adds nothing', inst('cursor').added, 0);
   check('install: other agents get commands, no file change', Array.isArray(inst('copilot').run), true);
+  check('install: hermes prints a hooks block for all 8 events', (inst('hermes').run[0].match(/--agent hermes/g) || []).length, 8);
 
   // ---- parity: every door matches the manifest ---------------------------------------------
   const daemonNames = toolsFor('daemon').map((x) => x.name).sort();
