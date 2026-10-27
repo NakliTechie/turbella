@@ -37,6 +37,7 @@ const HOOK_MAP = {
 
 const SRC = fileURLToPath(new URL('.', import.meta.url));
 const WEB = join(SRC, '..', 'web');
+const GUIDE = fileURLToPath(new URL('../guide', import.meta.url));
 // A fixed default port keeps the page URL stable; when taken, the OS picks one.
 const PORT = Number(process.env.TURBELLA_PORT ?? 7377);
 const IDLE_DEFAULT_MS = 10 * 60_000;
@@ -225,6 +226,25 @@ async function handleHttp(req, res) {
   if (path === '/status') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(status(parseFilter(req.url))));
+    return;
+  }
+  // The guide (guide/index.html, built by guide/regenerate.sh) and its screenshots only.
+  if (path === '/guide') { res.writeHead(301, { Location: '/guide/' }); res.end(); return; }
+  if (path === '/guide/') {
+    try {
+      const html = await readFile(join(GUIDE, 'index.html'), 'utf8');
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(html);
+    } catch { res.writeHead(404, { 'Content-Type': 'text/plain' }); res.end('guide not built: run guide/regenerate.sh'); }
+    return;
+  }
+  const shot = path.match(/^\/guide\/screenshots\/([a-z0-9-]+\.(png|jpg))$/);
+  if (shot) {
+    try {
+      const img = await readFile(join(GUIDE, 'screenshots', shot[1]));
+      res.writeHead(200, { 'Content-Type': shot[2] === 'png' ? 'image/png' : 'image/jpeg', 'Cache-Control': 'max-age=3600' });
+      res.end(img);
+    } catch { res.writeHead(404); res.end(); }
     return;
   }
   const page = { '/': 'turbella.html', '/index.html': 'turbella.html', '/viz': 'viz.html' }[path];

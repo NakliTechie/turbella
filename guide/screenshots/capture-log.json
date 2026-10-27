@@ -1,0 +1,44 @@
+[
+  {
+    "id": "01-timeline-empty",
+    "file": "01-timeline-empty.png",
+    "state": "ok",
+    "errors": []
+  },
+  {
+    "id": "02-timeline-live",
+    "file": "02-timeline-live.png",
+    "state": "ok",
+    "errors": []
+  },
+  {
+    "id": "03-visualiser-session",
+    "file": "03-visualiser-session.jpg",
+    "state": "ok",
+    "errors": []
+  },
+  {
+    "id": "04-visualiser-all",
+    "file": "04-visualiser-all.jpg",
+    "state": "ok",
+    "errors": []
+  },
+  {
+    "id": "05-window-session",
+    "file": "05-window-session.jpg",
+    "state": "ok",
+    "errors": []
+  },
+  {
+    "id": "06-window-all",
+    "file": "06-window-all.jpg",
+    "state": "ok",
+    "errors": []
+  },
+  {
+    "id": "07-timeline-offline",
+    "file": "07-timeline-offline.png",
+    "state": "ok",
+    "errors": []
+  }
+]

@@ -36,6 +36,9 @@
   body.offline #gauge { filter: grayscale(1); opacity: 0.6; }
   #toViz { font-size: 13px; color: var(--accent); text-decoration: none; }
   #toViz:hover { text-decoration: underline; }
+  .help { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 12px;
+    border: 1px solid var(--line); color: var(--muted); font-size: 13px; font-weight: 600; text-decoration: none; }
+  .help:hover { border-color: var(--muted); color: var(--ink); }
   #note { flex-basis: 100%; font-size: 12px; color: var(--warn); }
   #gauge { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-right: 8px; }
   #gaugeBar { width: 160px; height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
@@ -55,6 +58,7 @@
     turbulence <div id="gaugeBar"><div id="gaugeFill"></div></div> <span id="gaugeValue">0.00</span>
   </div>
   <a id="toViz" href="/viz">Visualiser</a>
+  <a class="help" href="/guide/" title="Guide: what each mark means" aria-label="Guide">?</a>
   <button id="btnPlay" data-tool="play pause">▶ Play</button>
   <button id="btnLive" data-tool="go_live">● Live</button>
   <label>speed</label>

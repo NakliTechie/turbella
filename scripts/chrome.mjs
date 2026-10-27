@@ -30,8 +30,10 @@ export async function launchChrome({ width = 1280, height = 800, scale = 2 } = {
 
   let id = 0;
   const pending = new Map();
+  const errors = []; // uncaught page exceptions, once Runtime is enabled
   ws.onmessage = (m) => {
     const msg = JSON.parse(m.data);
+    if (msg.method === 'Runtime.exceptionThrown') errors.push(msg.params?.exceptionDetails?.exception?.description ?? msg.params?.exceptionDetails?.text);
     if (pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); }
   };
   const send = (method, params = {}) => new Promise((res) => {
@@ -39,9 +41,11 @@ export async function launchChrome({ width = 1280, height = 800, scale = 2 } = {
     ws.send(JSON.stringify({ id, method, params }));
   });
   await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile: false });
+  await send('Runtime.enable');
 
   return {
     send,
+    errors,
     async evaluate(expression) {
       const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
       return r.result?.result?.value;

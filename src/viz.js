@@ -113,8 +113,12 @@ function onEvent(m) {
   track(ev);
   events.push(ev);
   if (events.length > 5000) events.splice(0, events.length - 5000);
-  // The backlog on connect feeds the gauge only; fresh events also make sound.
-  if ((ev.ts ?? 0) < opened - 2000) return;
+  // The backlog on connect sets the gauge and the status line (with its own
+  // time); only fresh events make sound.
+  if ((ev.ts ?? 0) < opened - 2000) {
+    if (ev.kind !== 'notification') status = { text: [ev.tool, stateOf(ev)].filter(Boolean).join(' · '), since: ev.ts ?? Date.now() };
+    return;
+  }
   signal.hit(ev);
   if (ev.kind === 'turn') nextLook();
   const running = ev.kind === 'tool' && ev.status === 'waiting';

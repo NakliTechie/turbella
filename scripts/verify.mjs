@@ -356,6 +356,9 @@ async function main() {
   check('filter: ?session= counts only that session', (await st('?session=other')).events, 2);
   check('filter: the gauge is per filter (failures in one session only)', byRun.gauge > (await st('?session=other')).gauge, true);
   check('filter: a filtered status lists no sessions', byRun.sessions, undefined);
+  const code = async (path) => (await fetch(`http://127.0.0.1:${h.port}${path}`)).status;
+  check('guide: the daemon serves the built guide and its screenshots', [await code('/guide/'), await code('/guide/screenshots/02-timeline-live.png')].join(','), '200,200');
+  check('guide: only plain screenshot names are served', [await code('/guide/screenshots/..%2Fcapture.mjs'), await code('/guide/capture.mjs')].join(','), '404,404');
   const streamed = (await readSSE(h.port, { count: 3, ms: 800, path: '/events?session=other' })).map((x) => x.ev);
   check('filter: /events?session= streams only that session, backlog included', streamed.length === 2 && streamed.every((e) => e.session === 'other'), true);
 

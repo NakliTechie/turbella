@@ -17,6 +17,9 @@
   .hud:hover { opacity: 1; }
   a { color: var(--ink); font-weight: 600; text-decoration: none; }
   a:hover { text-decoration: underline; }
+  .help { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 11px;
+    border: 1px solid rgba(244, 244, 242, 0.4); font-size: 12px; text-decoration: none; }
+  .help:hover { border-color: var(--ink); text-decoration: none; }
   button { background: transparent; border: 1px solid rgba(244, 244, 242, 0.4); color: var(--ink);
     padding: 4px 10px; border-radius: 6px; font: inherit; font-size: 12px; cursor: pointer; }
   button:hover { border-color: var(--ink); }
@@ -58,6 +61,7 @@
 <div class="hud" id="hud">
   <a href="/" title="Back to the timeline">Turbella</a>
   <span id="preset">loading…</span>
+  <a class="help" href="/guide/" title="Guide" aria-label="Guide">?</a>
   <button id="btnNext" class="icon" data-tool="next_look" aria-label="Next look" title="Next look"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3 2.5l7.5 5.5L3 13.5z" fill="currentColor"/><path d="M12.5 2.5v11" stroke="currentColor" stroke-width="1.8"/></svg></button>
   <button id="btnCycle" class="icon" data-tool="cycle_looks" aria-pressed="false" aria-label="Cycle looks" title="Cycle looks every 30 s"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 7.5A5.5 5.5 0 0 1 12.4 4.2"/><path d="M12.8 1.2v3.2H9.6"/><path d="M13.5 8.5A5.5 5.5 0 0 1 3.6 11.8"/><path d="M3.2 14.8v-3.2h3.2"/></svg></button>
   <button id="btnBar" class="icon" data-tool="set_toolbar" aria-pressed="false" aria-label="Hide bar" title="Hide this bar until the pointer comes back"><svg viewBox="0 0 24 16" width="16" height="11" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 8c3-4.5 6.7-7 11-7s8 2.5 11 7c-3 4.5-6.7 7-11 7S4 12.5 1 8z"/><circle cx="12" cy="8" r="3"/></svg></button>
