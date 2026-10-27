@@ -76,7 +76,7 @@ $('btnCycle').addEventListener('click', () => TOOLS.cycle_looks());
 $('btnBar').addEventListener('click', () => TOOLS.set_toolbar());
 
 const params = new URLSearchParams(location.search);
-if (params.has('overlay')) document.body.classList.add('overlay');
+if (params.has('overlay')) { document.body.classList.add('overlay'); $('hud').classList.add('quiet'); }
 let savedCycle = null;
 try { savedCycle = localStorage.getItem('turbella.cycle'); } catch {}
 if (params.get('cycle') === '1' || (params.get('cycle') !== '0' && savedCycle === '1')) cycleLooks({ on: true });
@@ -130,7 +130,7 @@ function showStatus() {
   if (!status) return;
   const s = Math.floor((Date.now() - status.since) / 1000);
   const busy = signal.running > 0 || signal.working;
-  const tail = !busy || s < 2 ? '' : signal.running > 0 ? ` · ${s} s` : ` · working, ${s} s since`;
+  const tail = !busy || s < 2 ? '' : ` · ${s} s`;
   $('last').textContent = status.text + tail;
 }
 setInterval(showStatus, 1000);
@@ -140,34 +140,40 @@ connect();
 // first, so the person sees who is doing what.
 const SESSION_ROWS = 8;
 const SESSION_MS = 15 * 60_000;
-const sessions = new Map(); // id -> { agent, text, since, open, working }; Map order = recency
-const labelOf = (ev) => [ev.tool, ev.kind === 'tool' && ev.status === 'waiting' ? 'running' : LABEL[ev.kind] ?? ev.kind]
-  .filter(Boolean).join(' · ');
+const sessions = new Map(); // id -> { agent, text, state, since, open, working, first }
+let seenOrder = 0;
+const stateOf = (ev) => (ev.kind === 'tool' && ev.status === 'waiting' ? 'running' : LABEL[ev.kind] ?? ev.kind);
+const STATE_CLASS = { failed: 'state-bad', 'waiting for permission': 'state-warn' };
 
 function track(ev) {
   if (only || !ev.session) return;
-  const s = sessions.get(ev.session) ?? { agent: ev.agent ?? 'agent', text: '', since: 0, open: new Set(), working: false };
+  const s = sessions.get(ev.session) ?? { agent: ev.agent ?? 'agent', tool: '', state: '', since: 0, open: new Set(), working: false, first: seenOrder++ };
   const key = `${ev.tool}|${ev.sig}`;
   if (ev.kind === 'tool' && ev.status === 'waiting') s.open.add(key);
   else if (ev.kind === 'tool' || ev.kind === 'tool_fail') s.open.delete(key);
   if (ev.kind === 'stop') { s.open.clear(); s.working = false; } else if (ev.kind !== 'notification') s.working = true;
-  if (ev.kind !== 'notification') { s.text = labelOf(ev); s.since = ev.ts ?? Date.now(); }
-  sessions.delete(ev.session);
+  if (ev.kind !== 'notification') { s.tool = ev.tool ?? ''; s.state = stateOf(ev); s.since = ev.ts ?? Date.now(); }
   sessions.set(ev.session, s);
 }
 
+// The rows keep the order sessions first appeared in, so the eye does not lose
+// its place; the most recently active SESSION_ROWS are shown.
 function showSessions() {
   if (only) return;
   const now = Date.now();
-  const rows = [...sessions.values()].filter((s) => now - s.since < SESSION_MS).reverse().slice(0, SESSION_ROWS);
+  const rows = [...sessions.values()].filter((s) => now - s.since < SESSION_MS)
+    .sort((a, b) => b.since - a.since).slice(0, SESSION_ROWS).sort((a, b) => a.first - b.first);
   $('sessions').replaceChildren(...rows.map((s) => {
     const secs = Math.floor((now - s.since) / 1000);
-    const tail = secs < 2 ? '' : s.open.size ? ` · ${secs} s` : s.working ? ` · working, ${secs} s since`
+    const tail = secs < 2 ? '' : s.open.size || s.working ? ` · ${secs} s`
       : ` · idle ${secs < 60 ? `${secs} s` : `${Math.floor(secs / 60)} min`}`;
     const row = document.createElement('div');
     const who = document.createElement('b');
     who.textContent = s.agent;
-    row.append(who, ` ${s.text}${tail}`);
+    const state = document.createElement('span');
+    state.textContent = s.state;
+    if (STATE_CLASS[s.state]) state.className = STATE_CLASS[s.state];
+    row.append(who, s.tool ? `${s.tool} · ` : '', state, tail);
     return row;
   }));
   $('last').hidden = rows.length > 0;

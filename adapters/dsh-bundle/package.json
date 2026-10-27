@@ -1,0 +1,10 @@
+{
+  "name": "turbella-dsh",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Turbella for dsh (DeepSeek Harness): the session log's tool calls, failures and turns, as Turbella events.",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

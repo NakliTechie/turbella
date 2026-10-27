@@ -12,7 +12,8 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
     font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
-  body { display: grid; grid-template-rows: auto 1fr auto; }
+  /* minmax(0, 1fr): a long header row never widens the canvas past the window. */
+  body { display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr); }
   header { padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
     display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   h1 { font-size: 14px; margin: 0 6px 0 0; letter-spacing: 0.04em; font-weight: 600; }
@@ -23,14 +24,21 @@
   button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   input[type=range] { accent-color: var(--accent); width: 140px; }
   label { font-size: 12px; color: var(--muted); }
+  input[type=file] { max-width: 180px; }
   select, input[type=file] { font: inherit; font-size: 12px; padding: 4px;
     background: var(--panel); border: 1px solid var(--line); color: var(--ink); border-radius: 4px; }
-  #status { font-size: 12px; color: var(--muted); }
+  #status { font-size: 12px; color: var(--muted); min-width: 22ch; white-space: nowrap; }
+  #overlayTime { font: 12px ui-monospace, monospace; color: var(--muted); margin-left: auto; white-space: nowrap; }
+  /* One header row on a wide screen, so its height never changes as the status text does. */
+  @media (min-width: 1024px) { header { flex-wrap: nowrap; overflow: hidden; } header:has(#note:not([hidden])) { flex-wrap: wrap; } }
+  /* The daemon went away: nothing here is live until it comes back. */
+  body.offline #status { color: var(--warn); }
+  body.offline #gauge { filter: grayscale(1); opacity: 0.6; }
   #toViz { font-size: 13px; color: var(--accent); text-decoration: none; }
   #toViz:hover { text-decoration: underline; }
   #note { flex-basis: 100%; font-size: 12px; color: var(--warn); }
-  #gauge { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
-  #gaugeBar { width: 120px; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+  #gauge { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-right: 8px; }
+  #gaugeBar { width: 160px; height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
   #gaugeFill { height: 100%; width: 0; background: var(--accent); transition: width 0.3s, background 0.3s; }
   #gaugeValue { font-variant-numeric: tabular-nums; color: var(--ink); min-width: 2.5em; }
   main { position: relative; min-height: 0; }
@@ -38,13 +46,14 @@
   canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
   footer { padding: 8px 16px; border-top: 1px solid var(--line); background: var(--panel);
     font-size: 12px; color: var(--muted); }
-  .overlay { position: absolute; bottom: 10px; left: 16px; pointer-events: none; }
-  #overlayTime { font: 12px ui-monospace, monospace; color: var(--muted); }
 </style>
 </head>
 <body>
 <header>
   <h1>Turbella</h1>
+  <div id="gauge" title="Turbulence: repeated failures, edit thrash, tool switching and time since progress, 0 to 1">
+    turbulence <div id="gaugeBar"><div id="gaugeFill"></div></div> <span id="gaugeValue">0.00</span>
+  </div>
   <a id="toViz" href="/viz">Visualiser</a>
   <button id="btnPlay" data-tool="play pause">▶ Play</button>
   <button id="btnLive" data-tool="go_live">● Live</button>
@@ -61,17 +70,12 @@
   <label>load</label>
   <input id="fileInput" data-tool="load_events" type="file" accept=".json,.jsonl,.txt">
   <div id="status">idle</div>
+  <div id="overlayTime">— / —</div>
   <div id="note" hidden>The visualiser needs WebGL 2, which this browser has turned off. The Claude desktop app's browser pane has it.</div>
-  <div id="gauge" title="Turbulence: repeated failures, edit thrash, tool switching and time since progress, 0 to 1">
-    turbulence <div id="gaugeBar"><div id="gaugeFill"></div></div> <span id="gaugeValue">0.00</span>
-  </div>
 </header>
 <main>
   <div id="wrap">
     <canvas id="canvas"></canvas>
-    <div class="overlay">
-      <div id="overlayTime">— / —</div>
-    </div>
   </div>
 </main>
 <footer>
@@ -102,7 +106,7 @@
   const gaugeFill = $('gaugeFill');
   const gaugeValue = $('gaugeValue');
 
-  const renderer = createRenderer(canvas);
+  const renderer = createRenderer(canvas, { emptyText: 'No agent events yet. Start a Claude Code session with the Turbella plugin, or load a transcript.' });
   window.addEventListener('resize', () => { renderer.resize(); draw(); });
   renderer.resize();
 
@@ -113,8 +117,9 @@
   let raf = null;
   let live = null;     // EventSource while connected to the daemon
   let follow = false;  // the playhead tracks the newest live event
+  let connected = false; // the live stream is open
   const SPEEDS = toolsFor('page').find((t) => t.name === 'set_speed').inputSchema.properties.speed.enum;
-  const following = () => !!live && follow;
+  const following = () => !!live && follow && connected;
 
   const t0 = () => allEvents[0]?.ts ?? 0;
   const span = () => (allEvents[allEvents.length - 1]?.ts ?? t0()) - t0();
@@ -127,10 +132,12 @@
   }
 
   function draw(snap = player.snapshot()) {
-    renderer.feed(snap, allEvents);
+    renderer.feed(snap, allEvents, following() ? { now: Date.now() } : {});
     renderer.draw();
     scrub.value = Math.round((snap.progress || 0) * 100);
-    overlayTime.textContent = formatMs(snap.time - t0()) + ' / ' + formatMs(span());
+    // While following live the clock runs on through a silent wait.
+    const end = following() && allEvents.length ? Date.now() - t0() : span();
+    overlayTime.textContent = formatMs(following() ? end : snap.time - t0()) + ' / ' + formatMs(end);
     btnPlay.textContent = player.playing ? '⏸ Pause' : '▶ Play';
     btnLive.classList.toggle('active', following());
     // Following live: measured against the wall clock, so a silent wait raises it.
@@ -225,7 +232,10 @@
       follow = true;
       show([], 'live · waiting for events…');
       live = new EventSource('/events');
+      const online = (on) => { connected = on; document.body.classList.toggle('offline', !on); };
+      live.onopen = () => { online(true); draw(); };
       live.onmessage = (e) => {
+        if (!connected) online(true);
         let ev;
         try { ev = JSON.parse(e.data); } catch { return; }
         allEvents.push(ev);
@@ -234,7 +244,7 @@
         status.textContent = `${allEvents.length} events · live`;
         draw();
       };
-      live.onerror = () => { status.textContent = 'live · reconnecting…'; };
+      live.onerror = () => { online(false); status.textContent = 'offline · reconnecting…'; draw(); };
       draw();
       return { live: true };
     },

@@ -212,8 +212,10 @@ async function install({ agent }) {
     codex: [`codex plugin marketplace add ${REPO}`, 'codex plugin add turbella@turbella', 'then run /hooks in Codex and trust the Turbella hooks'],
     copilot: ['copilot plugin install NakliTechie/turbella'],
     hermes: [`add to ~/.hermes/config.yaml:\n${hermesHooks()}`, 'then start hermes once in a terminal and approve the hooks (or pass --accept-hooks)'],
+    dsh: [`npx @deepseek-ai/dsh plugin --profile web add link:${fileURLToPath(new URL('../adapters/dsh-bundle', import.meta.url))}`,
+      'repeat with --profile headless (or any other profile) to cover it, then restart dsh'],
   }[agent];
-  if (!steps) throw new Error('agent must be one of claude, codex, copilot, cursor, hermes, opencode, pi, omp');
+  if (!steps) throw new Error('agent must be one of claude, codex, copilot, cursor, hermes, dsh, opencode, pi, omp');
   return { agent, run: steps };
 }
 

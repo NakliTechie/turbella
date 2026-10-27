@@ -1,0 +1,4 @@
+# Turbella's bundle layer: one plugin row, the adapter in ../dsh.js.
+- insert:
+    - id: turbella
+      name: turbella-dsh

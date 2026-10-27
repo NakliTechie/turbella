@@ -76,10 +76,10 @@ export const MANIFEST = Object.freeze([
 
   {
     name: 'install', place: 'daemon', effect: 'config', personOnly: true,
-    description: "Set Turbella up for an agent. For Cursor it adds Turbella's hooks to ~/.cursor/hooks.json; for opencode, pi and omp it writes a one-line plugin file into the agent's plugin folder; for Claude Code, Codex and Copilot it prints the plugin commands to run; for Hermes it prints the config.yaml hooks block. Person-only: it changes the person's own tool settings, so it is on the CLI and not offered to agents over MCP.",
+    description: "Set Turbella up for an agent. For Cursor it adds Turbella's hooks to ~/.cursor/hooks.json; for opencode, pi and omp it writes a one-line plugin file into the agent's plugin folder; for Claude Code, Codex and Copilot it prints the plugin commands to run; for Hermes it prints the config.yaml hooks block; for dsh the plugin command. Person-only: it changes the person's own tool settings, so it is on the CLI and not offered to agents over MCP.",
     inputSchema: {
       type: 'object',
-      properties: { agent: { type: 'string', enum: ['claude', 'codex', 'copilot', 'cursor', 'hermes', 'opencode', 'pi', 'omp'] } },
+      properties: { agent: { type: 'string', enum: ['claude', 'codex', 'copilot', 'cursor', 'hermes', 'dsh', 'opencode', 'pi', 'omp'] } },
       required: ['agent'],
       additionalProperties: false,
     },

@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  A Claude Code plugin and a local page. macOS (Linux untested), Node 22. No account, no server, no telemetry.
+  A Claude Code plugin and a local page. macOS, Node 22. No account, no server, no telemetry.
 </p>
 
 <p align="center">
@@ -27,6 +27,8 @@
 | **Copilot CLI** | `copilot plugin install NakliTechie/turbella` |
 | **Cursor** | `turbella install cursor` adds Turbella's hooks to `~/.cursor/hooks.json`; restart Cursor |
 | **Codex** | `codex plugin marketplace add <path to a clone>`, `codex plugin add turbella@turbella`, then trust its hooks with `/hooks` in Codex |
+| **Hermes** | `turbella install hermes` prints a `hooks:` block for `~/.hermes/config.yaml`; approve the hooks when Hermes next starts |
+| **opencode, pi, omp** | `turbella install opencode` (or `pi`, `omp`) writes a one-line plugin file into the agent's plugin folder; restart the agent |
 | **The `turbella` command** | in the clone, `npm link` puts it on your PATH; or run `node bin/turbella` |
 
 Start a session. The first hook starts the Turbella daemon and opens the visualiser at
@@ -93,24 +95,22 @@ turbella install opencode         # also cursor, pi, omp; claude, codex, copilot
 turbella start                    # run the daemon in the foreground
 ```
 
-Every command is declared once in `src/manifest.js`. All but the person-only `install` and
-`run` are served over MCP by `bin/turbella-mcp`; both pages publish their controls to agents as
-`navigator.modelContext` tools, or as `window.turbella.tools` without WebMCP.
+Every command is declared once in `src/manifest.js`; all but the person-only `install` and `run`
+are served over MCP by `bin/turbella-mcp`, and the pages publish their controls to agents.
 
 ## Verify it yourself
 
 ```
 npm run verify     # readers, gauge, playback, daemon, hook binary, CLI, MCP, manifest parity
 npm run ttfv       # cold start: first hook to event on the page, gate 5 s (needs Chrome)
+npm run strip      # the terminal strip against the same program unwrapped (needs tmux)
 node marketing/capture.mjs   # regenerate the README images and social card from a scripted session
 ```
 
-`npm run verify` runs the real hook binary against a daemon, checks that no file body,
-prompt, output or error text leaves the hook, and fails if the CLI, the MCP tool list or
-the page controls stop matching the manifest. `npm run ttfv` drives headless Chrome (set
-`CHROME_BIN` if Chrome is not in `/Applications`) and measured under 250 ms on an Apple
-Silicon Mac. Delivery from real Claude Code, Codex and Copilot CLI sessions was checked by
-hand on 2026-10-21 and 2026-10-22; Cursor was not. No script repeats those checks.
+`npm run verify` runs the real hook binary against a daemon, checks that no file body, prompt,
+output or error text leaves the hook, and fails if the CLI, MCP and page controls drift from the
+manifest. `npm run ttfv` measured 167–367 ms on an Apple Silicon Mac. Live runs were checked by
+hand (Claude Code, Codex, Copilot CLI, opencode; pi and omp turn and stop only); Cursor and Hermes were not.
 
 ## License
 
