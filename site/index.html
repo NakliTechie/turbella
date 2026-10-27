@@ -71,6 +71,10 @@
   footer { border-top: 1px solid var(--line); }
   footer .bar { font-size: 14px; color: var(--muted); flex-wrap: wrap; }
   footer a { color: var(--muted); }
+  .looks { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin: 0 0 18px; padding: 0; list-style: none; }
+  .looks figure { margin: 0; }
+  .looks video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 10px; border: 1px solid var(--line); background: #000; }
+  @media (max-width: 600px) { .looks { grid-template-columns: 1fr; } }
   /* On a phone each agent row becomes a block: name, command, what it does. */
   @media (max-width: 640px) {
     table, tbody, tr, td { display: block; width: 100%; }
@@ -114,6 +118,47 @@
       stuck, adds noise and wobble as the agent gets stuck. A readout says what each agent is doing and for how long.</p>
     <figure><img src="visualiser.jpg" alt="The Turbella visualiser with its gauge and status readout" loading="lazy">
       <figcaption>The visualiser at <code>/viz</code>, one session, with its gauge and status.</figcaption></figure>
+  </section>
+
+  <section>
+    <h2>Six looks</h2>
+    <p>Each clip is a different MilkDrop preset, recorded from the real visualiser at real speed while a scripted
+      session reads, edits and fails twice. The readout at the bottom left shows the gauge and the current action.</p>
+    <ul class="looks">
+      <li><figure><video src="samples/mirror.mp4" poster="samples/mirror.jpg" autoplay muted loop playsinline preload="none"
+        aria-label="The visualiser in the Mirror style"></video>
+        <figcaption><b>Mirror</b> · Aderrasi - Potion of Spirits</figcaption></figure></li>
+      <li><figure><video src="samples/canyon.mp4" poster="samples/canyon.jpg" autoplay muted loop playsinline preload="none"
+        aria-label="The visualiser in the Canyon style"></video>
+        <figcaption><b>Canyon</b> · Flexi + Martin - cascading decay swing</figcaption></figure></li>
+      <li><figure><video src="samples/ribbons.mp4" poster="samples/ribbons.jpg" autoplay muted loop playsinline preload="none"
+        aria-label="The visualiser in the Ribbons style"></video>
+        <figcaption><b>Ribbons</b> · Krash + Illusion - Spiral Movement</figcaption></figure></li>
+      <li><figure><video src="samples/spiral.mp4" poster="samples/spiral.jpg" autoplay muted loop playsinline preload="none"
+        aria-label="The visualiser in the Spiral style"></video>
+        <figcaption><b>Spiral</b> · Rovastar - Oozing Resistance</figcaption></figure></li>
+      <li><figure><video src="samples/vortex.mp4" poster="samples/vortex.jpg" autoplay muted loop playsinline preload="none"
+        aria-label="The visualiser in the Vortex style"></video>
+        <figcaption><b>Vortex</b> · Milk Artist At our Best - FED - SlowFast Ft AdamFX n Martin - HD CosmoFX</figcaption></figure></li>
+      <li><figure><video src="samples/lattice.mp4" poster="samples/lattice.jpg" autoplay muted loop playsinline preload="none"
+        aria-label="The visualiser in the Lattice style"></video>
+        <figcaption><b>Lattice</b> · Unchained - Rewop</figcaption></figure></li>
+    </ul>
+    <script>
+      // Play each sample only while it is on screen.
+      (() => {
+        const vids = document.querySelectorAll('.looks video');
+        if (!('IntersectionObserver' in window)) { vids.forEach((v) => { v.preload = 'auto'; }); return; }
+        vids.forEach((v) => { v.autoplay = false; });
+        const io = new IntersectionObserver((entries) => {
+          for (const e of entries) {
+            if (e.isIntersecting) { e.target.preload = 'auto'; e.target.play().catch(() => {}); }
+            else e.target.pause();
+          }
+        }, { threshold: 0.25 });
+        vids.forEach((v) => io.observe(v));
+      })();
+    </script>
   </section>
 
   <section>

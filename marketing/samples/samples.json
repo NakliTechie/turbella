@@ -1,0 +1,56 @@
+{
+ "recorded": "2026-10-27",
+ "source": "GET /viz?session=demo&cycle=0 on a temporary Turbella daemon; headless Chrome, software WebGL (SwiftShader), real time, no speed-up",
+ "driver": "scripted burst through bin/turbella-hook: Read, Grep, Read, Edit, Bash fail x2, Edit, Bash ok",
+ "video": "H.264 640x360 30 fps yuv420p, CRF 28 raised per clip to stay under 900000 bytes, no audio, +faststart; recorded at 854x480",
+ "samples": [
+  {
+   "slug": "mirror",
+   "label": "Mirror",
+   "preset": "Aderrasi - Potion of Spirits",
+   "duration": 9,
+   "size": 814006,
+   "crf": 34
+  },
+  {
+   "slug": "canyon",
+   "label": "Canyon",
+   "preset": "Flexi + Martin - cascading decay swing",
+   "duration": 9,
+   "size": 756445,
+   "crf": 28
+  },
+  {
+   "slug": "ribbons",
+   "label": "Ribbons",
+   "preset": "Krash + Illusion - Spiral Movement",
+   "duration": 9,
+   "size": 441417,
+   "crf": 28
+  },
+  {
+   "slug": "spiral",
+   "label": "Spiral",
+   "preset": "Rovastar - Oozing Resistance",
+   "duration": 9,
+   "size": 233023,
+   "crf": 28
+  },
+  {
+   "slug": "vortex",
+   "label": "Vortex",
+   "preset": "Milk Artist At our Best - FED - SlowFast Ft AdamFX n Martin - HD CosmoFX",
+   "duration": 9,
+   "size": 759831,
+   "crf": 34
+  },
+  {
+   "slug": "lattice",
+   "label": "Lattice",
+   "preset": "Unchained - Rewop",
+   "duration": 9,
+   "size": 709853,
+   "crf": 36
+  }
+ ]
+}
