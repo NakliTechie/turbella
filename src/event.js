@@ -75,7 +75,8 @@ export async function hashToolInput(input) {
   }
   // Codex's apply_patch names its file inside the patch text.
   const patched = typeof args?.command === 'string' ? args.command.match(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/m)?.[1] : null;
-  const path = args?.file_path ?? args?.notebook_path ?? patched;
+  // Claude Code names the file `file_path`; opencode `filePath`; pi and omp `path`.
+  const path = args?.file_path ?? args?.notebook_path ?? args?.filePath ?? args?.path ?? patched;
   return {
     sig: args === undefined ? null : await contentHash(args),
     target: typeof path === 'string' ? await contentHash(path) : null,

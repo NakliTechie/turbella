@@ -99,6 +99,7 @@ live.onmessage = (m) => {
   let ev;
   try { ev = JSON.parse(m.data); } catch { return; }
   if (only && ev.session !== only) return;
+  track(ev);
   events.push(ev);
   if (events.length > 5000) events.splice(0, events.length - 5000);
   // The backlog on connect feeds the gauge only; fresh events also make sound.
@@ -123,6 +124,44 @@ function showStatus() {
   $('last').textContent = status.text + tail;
 }
 setInterval(showStatus, 1000);
+
+// All sessions together (no ?session): one line per agent session, newest
+// first, so the person sees who is doing what.
+const SESSION_ROWS = 8;
+const SESSION_MS = 15 * 60_000;
+const sessions = new Map(); // id -> { agent, text, since, open, working }; Map order = recency
+const labelOf = (ev) => [ev.tool, ev.kind === 'tool' && ev.status === 'waiting' ? 'running' : LABEL[ev.kind] ?? ev.kind]
+  .filter(Boolean).join(' · ');
+
+function track(ev) {
+  if (only || !ev.session) return;
+  const s = sessions.get(ev.session) ?? { agent: ev.agent ?? 'agent', text: '', since: 0, open: new Set(), working: false };
+  const key = `${ev.tool}|${ev.sig}`;
+  if (ev.kind === 'tool' && ev.status === 'waiting') s.open.add(key);
+  else if (ev.kind === 'tool' || ev.kind === 'tool_fail') s.open.delete(key);
+  if (ev.kind === 'stop') { s.open.clear(); s.working = false; } else if (ev.kind !== 'notification') s.working = true;
+  if (ev.kind !== 'notification') { s.text = labelOf(ev); s.since = ev.ts ?? Date.now(); }
+  sessions.delete(ev.session);
+  sessions.set(ev.session, s);
+}
+
+function showSessions() {
+  if (only) return;
+  const now = Date.now();
+  const rows = [...sessions.values()].filter((s) => now - s.since < SESSION_MS).reverse().slice(0, SESSION_ROWS);
+  $('sessions').replaceChildren(...rows.map((s) => {
+    const secs = Math.floor((now - s.since) / 1000);
+    const tail = secs < 2 ? '' : s.open.size ? ` · ${secs} s` : s.working ? ` · working, ${secs} s since`
+      : ` · idle ${secs < 60 ? `${secs} s` : `${Math.floor(secs / 60)} min`}`;
+    const row = document.createElement('div');
+    const who = document.createElement('b');
+    who.textContent = s.agent;
+    row.append(who, ` ${s.text}${tail}`);
+    return row;
+  }));
+  $('last').hidden = rows.length > 0;
+}
+setInterval(showSessions, 1000);
 
 function updateGauge() {
   const g = gaugeSnapshot(events, { now: Date.now() });

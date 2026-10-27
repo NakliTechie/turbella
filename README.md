@@ -75,10 +75,10 @@ only by you and on `127.0.0.1`, and answers only requests addressed to this mach
 
 ## Other agents
 
-Turbella hooks into Claude Code, Codex, Copilot CLI, Cursor and Hermes, each on its own
-lanes; Cursor also reports thinking time. Codex reports no exit code for shell commands, so
-a failed Codex shell command shows as a normal call. Any other app can send events and read
-the gauge; [docs/PLUGINS.md](docs/PLUGINS.md) is the contract, with Hermes as the example.
+Turbella hooks into Claude Code, Codex, Copilot CLI, Cursor, Hermes, opencode, pi and omp,
+each on its own lanes. Codex reports no exit code for shell commands, so a failed Codex
+shell command shows as a normal call. Any other app can send events and read the gauge;
+[docs/PLUGINS.md](docs/PLUGINS.md) is the contract, with worked examples.
 
 ## Commands
 
@@ -89,7 +89,7 @@ turbella run claude               # any agent, with its own gauge strip on the t
 turbella status                   # events, counts by kind, the gauge, as JSON
 turbella emit --kind tool_fail --tool Bash --payload '"exit 1"'   # send one event
 turbella replay <file.jsonl>      # counts and gauge for a recorded transcript
-turbella install cursor           # add the hooks to Cursor (claude, codex, copilot, hermes: prints steps)
+turbella install opencode         # also cursor, pi, omp; claude, codex, copilot, hermes print steps
 turbella start                    # run the daemon in the foreground
 ```
 

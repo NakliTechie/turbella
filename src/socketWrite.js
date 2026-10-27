@@ -24,8 +24,11 @@ export function writeEvent(obj, { timeout = 150 } = {}) {
 
 // Start the daemon detached, so it outlives the process that launched it. If
 // two start at once, the loser finds a live socket and exits.
+// Inside another runtime (an agent's plugin under Bun) process.execPath is that
+// agent's binary, so fall back to `node` on the PATH.
 export function spawnDaemon() {
-  const child = spawn(process.execPath, [DAEMON_BIN, 'start'], { detached: true, stdio: 'ignore', env: process.env });
+  const node = /[/\\]node(\.exe)?$/.test(process.execPath) ? process.execPath : 'node';
+  const child = spawn(node, [DAEMON_BIN, 'start'], { detached: true, stdio: 'ignore', env: process.env });
   child.on('error', () => {});
   child.unref();
 }

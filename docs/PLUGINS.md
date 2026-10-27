@@ -112,6 +112,22 @@ which is hashed in the hook and never sent. `turbella install hermes` prints the
 `hooks:` block for `~/.hermes/config.yaml`; Hermes asks you to approve the hooks the
 first time it runs them.
 
-To add another hook-based agent, copy that pattern: map its event names in `EVENT`, read
+## Worked example: opencode, pi and omp (in-process)
+
+These agents load JavaScript plugins, so their adapters run inside the agent and write to
+the socket directly, with no process started per call. All three share `adapters/sink.js`,
+which hashes in the agent's process and sends events one after another, in order.
+`turbella install opencode` (or `pi`, `omp`) writes a one-line file into the agent's plugin
+folder that re-exports the adapter; delete that file to remove it.
+
+| Agent | Source events | Turbella kinds |
+|---|---|---|
+| opencode (`adapters/opencode.js`) | `chat.message`; tool parts `running`, `completed`, `error`; reasoning parts; `permission.updated`/`.replied`; `session.idle` | turn; tool start, end or failure (a shell exit code other than 0 fails); think with duration; permission; stop |
+| pi, omp (`adapters/pi.js`, `adapters/omp.js`) | `agent_start`, `tool_execution_start`, `tool_execution_end` (`isError`), `agent_end` | turn; tool start; end or failure with duration; stop |
+
+The pi and omp adapter waits for its queue at `agent_end`, because in print mode the agent
+exits right after it.
+
+To add another hook-based agent, copy the Hermes pattern: map its event names in `EVENT`, read
 its fields in `normalise()`, add a profile that says which calls failed, teach
 `detectAgent()` its payload shape, and add real-shape payloads to `scripts/verify.mjs`.

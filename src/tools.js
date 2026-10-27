@@ -150,7 +150,29 @@ const HERMES_EVENTS = ['on_session_start', 'pre_llm_call', 'pre_tool_call', 'pos
 const hermesHooks = () => ['hooks:', ...HERMES_EVENTS.flatMap((ev) =>
   [`  ${ev}:`, `    - command: "${HOOK} --agent hermes"`, '      timeout: 5'])].join('\n');
 
+// In-process adapters (adapters/): install writes a one-line file into the
+// agent's own plugin folder that re-exports the adapter from this checkout.
+const ADAPTERS = {
+  opencode: { file: ['.config', 'opencode', 'plugin', 'turbella.js'], line: (src) => `export { TurbellaPlugin } from ${JSON.stringify(src)};` },
+  pi: { file: ['.pi', 'agent', 'extensions', 'turbella.ts'], line: (src) => `export { default } from ${JSON.stringify(src)};` },
+  omp: { file: ['.omp', 'agent', 'extensions', 'turbella.ts'], line: (src) => `export { default } from ${JSON.stringify(src)};` },
+};
+
+function installAdapter(agent) {
+  const { file, line } = ADAPTERS[agent];
+  const path = join(homedir(), ...file);
+  const src = fileURLToPath(new URL(`../adapters/${agent}.js`, import.meta.url));
+  const body = `// Turbella adapter, written by \`turbella install ${agent}\`. Delete this file to remove it.\n${line(src)}\n`;
+  const same = existsSync(path) && readFileSync(path, 'utf8') === body;
+  if (!same) {
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, body);
+  }
+  return { agent, file: path, added: same ? 0 : 1, note: same ? 'Already installed.' : `Restart ${agent} to load it.` };
+}
+
 async function install({ agent }) {
+  if (ADAPTERS[agent]) return installAdapter(agent);
   if (agent === 'cursor') {
     const dir = join(homedir(), '.cursor');
     const file = join(dir, 'hooks.json');
@@ -179,7 +201,7 @@ async function install({ agent }) {
     copilot: ['copilot plugin install NakliTechie/turbella'],
     hermes: [`add to ~/.hermes/config.yaml:\n${hermesHooks()}`, 'then start hermes once in a terminal and approve the hooks (or pass --accept-hooks)'],
   }[agent];
-  if (!steps) throw new Error('agent must be one of claude, codex, copilot, cursor, hermes');
+  if (!steps) throw new Error('agent must be one of claude, codex, copilot, cursor, hermes, opencode, pi, omp');
   return { agent, run: steps };
 }
 

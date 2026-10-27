@@ -10,7 +10,7 @@
 //   turbella run [--] <agent> [args...]
 //   turbella emit [--kind K] [--status S] [--tool T] [--session ID] [--agent NAME] [--payload JSON]
 //   turbella replay <transcript.jsonl>
-//   turbella install <claude|codex|copilot|cursor|hermes>
+//   turbella install <claude|codex|copilot|cursor|hermes|opencode|pi|omp>
 import { start, stop, AlreadyRunning } from '../src/daemon.js';
 import { HANDLERS } from '../src/tools.js';
 

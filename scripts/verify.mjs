@@ -106,6 +106,8 @@ async function main() {
   check('gauge: a long silence never drops it to 0', gaugeSnapshot(base, { now: t + 6 * 60_000 }) > 0, true);
   const withStarts = base.flatMap((e) => (e.kind === 'tool' ? [{ ...e, status: 'waiting' }, e] : [e]));
   check('gauge: tool-start events change nothing', gaugeSnapshot(withStarts, { now: t + 3000 }), gaugeSnapshot(base, { now: t + 3000 }));
+  const thrash = (tool) => Array.from({ length: 5 }, (_, i) => ({ ts: t + i * 1000, kind: 'tool', status: 'ok', tool, target: 'sha256:' + 'a'.repeat(64) }));
+  check('gauge: edit thrash counts lowercase edit tools (opencode, pi, omp)', gaugeSnapshot(thrash('edit'), { now: t + 5000 }), gaugeSnapshot(thrash('Edit'), { now: t + 5000 }));
   const withWait = [...base, { ts: t + 50_000, kind: 'permission', status: 'waiting' }];
   check('gauge: a permission wait is not progress', gaugeSnapshot(withWait, { now: t + 60_000 }), gaugeSnapshot(base, { now: t + 60_000 }));
   const sameFile = [1, 2, 3, 4, 5].map((i) => ok(t + i, 'Edit', { target: 'sha256:a' }));
@@ -351,6 +353,39 @@ async function main() {
   check('filter: the gauge is per filter (failures in one session only)', byRun.gauge > (await st('?session=other')).gauge, true);
   check('filter: a filtered status lists no sessions', byRun.sessions, undefined);
 
+  // In-process adapters, driven with each agent's documented event shapes.
+  daemonClear();
+  const { TurbellaPlugin } = await import('../adapters/opencode.js');
+  const oc = await TurbellaPlugin({});
+  const ocTool = (status, extra = {}) => ({ type: 'message.part.updated', properties: { part: { id: 'p1', sessionID: 'oc1', messageID: 'm', type: 'tool', callID: 'c1', tool: 'bash', state: { status, input: { command: 'make' }, ...extra } } } });
+  await oc['chat.message']({ sessionID: 'oc1' }, {});
+  await oc.event({ event: ocTool('running', { time: { start: 1000 } }) });
+  await oc.event({ event: ocTool('running', { time: { start: 1000 } }) });
+  await oc.event({ event: ocTool('completed', { output: 'SECRET-OUT', title: '', metadata: { exit: 2 }, time: { start: 1000, end: 1400 } }) });
+  await oc.event({ event: { type: 'message.part.updated', properties: { part: { id: 'r1', sessionID: 'oc1', messageID: 'm', type: 'reasoning', text: 'SECRET-THINK', time: { start: 0, end: 2500 } } } } });
+  await oc.event({ event: { type: 'session.idle', properties: { sessionID: 'oc1' } } });
+  await sleep(300);
+  const ocEvs = (await readSSE(h.port, { count: 5 })).map((x) => x.ev);
+  const shape = (evs) => evs.map((e) => e.kind + (e.status === 'waiting' ? '*' : '')).join(',');
+  check('opencode: turn, one start, shell exit 2 fails, think, stop', shape(ocEvs), 'turn,tool*,tool_fail,think,stop');
+  check('opencode: lane and durations; no output or thinking text', ocEvs.every((e) => e.agent === 'opencode') && ocEvs[2].dur_ms === 400 && ocEvs[3].dur_ms === 2500 && !JSON.stringify(ocEvs).includes('SECRET'), true);
+
+  daemonClear();
+  const on = {};
+  const { turbellaExtension } = await import('../adapters/pi.js');
+  turbellaExtension('omp')({ on: (name, fn) => { on[name] = fn; } });
+  const ctx = { sessionManager: { getSessionId: () => 'pi1' } };
+  await on.agent_start({ prompt: 'SECRET' }, ctx);
+  await on.tool_execution_start({ toolCallId: 't1', toolName: 'edit', args: { path: '/a.js', oldText: 'SECRET' } }, ctx);
+  await on.tool_execution_end({ toolCallId: 't1', toolName: 'edit', result: { content: [{ type: 'text', text: 'SECRET-ERR' }] }, isError: true }, ctx);
+  await on.tool_execution_start({ toolCallId: 't2', toolName: 'read', args: { path: '/a.js' } }, ctx);
+  await on.tool_execution_end({ toolCallId: 't2', toolName: 'read', result: {}, isError: false }, ctx);
+  await on.agent_end({}, ctx);
+  await sleep(300);
+  const piEvs = (await readSSE(h.port, { count: 6 })).map((x) => x.ev);
+  check('pi/omp: turn, start, failure, start, end, stop in order', shape(piEvs), 'turn,tool*,tool_fail,tool*,tool,stop');
+  check('pi/omp: lane, session, edited file hashed as target; no text', piEvs.every((e) => e.agent === 'omp' && e.session === 'pi1') && /^sha256:/.test(piEvs[1].target ?? '') && !JSON.stringify(piEvs).includes('SECRET'), true);
+
   daemonClear();
   runHook({ hook_event_name: 'UserPromptSubmit', session_id: 's', prompt: 'hello' });
   await sleep(100);
@@ -419,6 +454,10 @@ async function main() {
   check('install: a second run adds nothing', inst('cursor').added, 0);
   check('install: other agents get commands, no file change', Array.isArray(inst('copilot').run), true);
   check('install: hermes prints a hooks block for all 8 events', (inst('hermes').run[0].match(/--agent hermes/g) || []).length, 8);
+  for (const [agent, file] of [['opencode', '.config/opencode/plugin/turbella.js'], ['pi', '.pi/agent/extensions/turbella.ts'], ['omp', '.omp/agent/extensions/turbella.ts']]) {
+    check(`install: ${agent} writes one re-export file`, inst(agent).added === 1 && readFileSync(join(home, file), 'utf8').includes(`adapters/${agent}.js`), true);
+    check(`install: ${agent} a second run writes nothing`, inst(agent).added, 0);
+  }
 
   // ---- parity: every door matches the manifest ---------------------------------------------
   const daemonNames = toolsFor('daemon').map((x) => x.name).sort();

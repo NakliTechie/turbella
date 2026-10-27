@@ -22,7 +22,9 @@ export const WEIGHTS = Object.freeze({
   idle: 0.2,
 });
 
-const EDIT_TOOLS = /^(Write|Edit|MultiEdit|NotebookEdit|apply_patch)$/;
+// Claude Code's names, Codex's apply_patch, and the lowercase edit/write/patch
+// tools of opencode, pi and omp.
+const EDIT_TOOLS = /^(write|edit|multiedit|notebookedit|apply_patch|patch)$/i;
 const clamp = (v) => Math.min(1, Math.max(0, v));
 
 export function gaugeSnapshot(events, opts = {}) {
