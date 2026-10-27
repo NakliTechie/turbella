@@ -92,7 +92,7 @@ function receive(line) {
   let raw;
   try { raw = JSON.parse(line); } catch { return; }
   if (!raw || typeof raw !== 'object') return;
-  if (typeof raw.transcript === 'string') tailer.follow(raw.transcript);
+  if (typeof raw.transcript === 'string') tailer.follow(raw.transcript, typeof raw.run === 'string' ? raw.run : null);
   if (raw.kind === 'ping') { resetIdle(); return; }
   if (typeof raw.type === 'string') {
     const m = HOOK_MAP[raw.type];
@@ -141,16 +141,43 @@ function handleSocket(socket) {
   socket.on('error', () => socket.destroy());
 }
 
-function status() {
-  const recent = events.map((e) => e.ev);
-  return {
+const ACTIVE_MS = 15 * 60_000; // a session with an event this recent is listed as active
+
+// Daemon status. With a filter ({session, run, agent}), the counts and the
+// gauge cover only the matching events; without one, it also lists the
+// sessions active in the last 15 minutes.
+function status(filter = {}) {
+  const keys = ['session', 'run', 'agent'].filter((k) => typeof filter[k] === 'string' && filter[k]);
+  const all = events.map((e) => e.ev);
+  const recent = keys.length ? all.filter((ev) => keys.every((k) => ev[k] === filter[k])) : all;
+  const byKind = {};
+  if (keys.length) for (const ev of recent) byKind[ev.kind] = (byKind[ev.kind] || 0) + 1;
+  const out = {
     schema: SCHEMA,
-    events: totals.events,
-    byKind: totals.byKind,
+    events: keys.length ? recent.length : totals.events,
+    byKind: keys.length ? byKind : totals.byKind,
     gauge: Math.round(gaugeSnapshot(recent, { now: Date.now() }) * 1000) / 1000,
     sockPath: sockPath(),
     pages: clients.size,
   };
+  if (keys.length) out.filter = Object.fromEntries(keys.map((k) => [k, filter[k]]));
+  else out.sessions = activeSessions(all);
+  return out;
+}
+
+function activeSessions(all) {
+  const now = Date.now();
+  const seen = new Map();
+  for (const ev of all) {
+    if (!ev.session || now - ev.ts > ACTIVE_MS) continue;
+    const s = seen.get(ev.session) ?? { session: ev.session, agent: ev.agent, run: ev.run, events: 0, last: 0, stopped: false };
+    s.events++;
+    s.last = Math.max(s.last, ev.ts);
+    if (ev.ts >= s.last) s.stopped = ev.kind === 'stop';
+    if (ev.run) s.run = ev.run;
+    seen.set(ev.session, s);
+  }
+  return [...seen.values()].sort((a, b) => b.last - a.last).slice(0, 32);
 }
 
 async function handleHttp(req, res) {
@@ -177,7 +204,7 @@ async function handleHttp(req, res) {
   }
   if (path === '/status') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(status()));
+    res.end(JSON.stringify(status(Object.fromEntries(new URL(req.url, 'http://x').searchParams))));
     return;
   }
   const page = { '/': 'turbella.html', '/index.html': 'turbella.html', '/viz': 'viz.html' }[path];

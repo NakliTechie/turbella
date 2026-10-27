@@ -34,6 +34,7 @@ One JSON object per event. Fields, as `src/event.js` checks them:
 | `ts` | number | epoch milliseconds; defaults to the time the daemon receives it |
 | `sig` | `sha256:<64 hex>` | hash of what names the call, so repeats show as a loop |
 | `target` | `sha256:<64 hex>` | hash of the file path an edit touched, for edit thrash |
+| `run` | string, 64 chars | set from `$TURBELLA_RUN` when the agent runs under `turbella run`, so that terminal's strip shows only this agent; copy it if your adapter sees it |
 
 How the page and the gauge read them:
 
@@ -82,8 +83,13 @@ The daemon serves these only on `127.0.0.1` (port 7377 unless taken; the address
 - `GET /events` streams every event as server-sent events: `id: <n>` then
   `data: <event JSON>`. On connect it first sends what it holds (up to 10,000 events);
   send `Last-Event-ID` to get only newer ones.
-- `GET /status` returns `{schema, events, byKind, gauge, sockPath, pages}`; `gauge` is the
-  turbulence from 0 (calm) to 1 (stuck) over the last 5 minutes, across all sessions.
+- `GET /status` returns `{schema, events, byKind, gauge, sockPath, pages, sessions}`.
+  `gauge` is the turbulence from 0 (calm) to 1 (stuck) over the last 5 minutes.
+  `sessions` lists sessions with an event in the last 15 minutes, newest first:
+  `{session, agent, run, events, last, stopped}`.
+- `GET /status?session=<id>` (or `?run=`, `?agent=`, combined with `&`) counts and
+  measures only the matching events, and leaves out `sessions`.
+- `GET /viz?session=<id>` is the visualiser for one session; the floating windows use it.
 
 ## Worked example: Hermes Agent
 

@@ -2,13 +2,15 @@
 // or `turbella run` (src/tools.js) with the system swiftc. No dependencies.
 //
 //   turbella-native overlay <url> <pidfile>
-//       A small always-on-top window showing the page at <url>. It floats over
-//       every app and Space and never takes focus from the agent. A menu bar
-//       item switches pages, cycles looks, sets opacity and click-through.
+//       Small always-on-top windows showing the daemon at <url>: one per active
+//       agent session by default, or one for all sessions. They float over every
+//       app and Space and never take focus from the agent. A menu bar item
+//       switches that mode, pages, looks, opacity and click-through.
 //
 //   turbella-native run <port> <command> [args...]
 //       Runs the command in a pseudo-terminal one row shorter than this one and
-//       pins a one-line strip (gauge, current tool) to the top row. Rows the
+//       pins a one-line strip (gauge, current tool) to the top row. The strip
+//       shows only this agent: TURBELLA_RUN tags its events. Rows the
 //       agent addresses are shifted down by one on the way out, and cursor and
 //       mouse reports shifted up by one on the way in, so the agent never sees
 //       the strip.
@@ -28,33 +30,112 @@ func fail(_ msg: String) -> Never {
 
 // MARK: - overlay
 
+// One floating window: a panel holding the visualiser for one session, or for
+// all sessions together (key "*").
+final class Floater {
+  let key: String
+  let slot: Int
+  let panel: NSPanel
+  let web: WKWebView
+  init(key: String, slot: Int, panel: NSPanel, web: WKWebView) { self.key = key; self.slot = slot; self.panel = panel; self.web = web }
+}
+
 final class Overlay: NSObject, NSApplicationDelegate, NSWindowDelegate {
-  let url: URL
+  static let all = "*"
+  static let maxWindows = 8
+  let base: URL
   let pidfile: String
-  var panel: NSPanel!
-  var web: WKWebView!
+  var windows: [String: Floater] = [:]
+  var dismissed = Set<String>()     // closed by the person; not reopened
+  var showViz = true
   var item: NSStatusItem!
   var cycleItem: NSMenuItem!
   var nextItem: NSMenuItem!
   var lockItem: NSMenuItem!
+  var perSessionItem: NSMenuItem!
   var opacityItems: [NSMenuItem] = []
-  var onViz = true
+  var session: URLSession!
+  var timer: Timer?
   let defaults = UserDefaults(suiteName: "com.naklitechie.turbella.overlay") ?? .standard
+  var perSession: Bool { defaults.object(forKey: "perSession") as? Bool ?? true }
+  var opacity: CGFloat { defaults.object(forKey: "opacity") as? CGFloat ?? 1 }
+  var clickThrough = false
 
-  init(url: URL, pidfile: String) { self.url = url; self.pidfile = pidfile }
+  init(url: URL, pidfile: String) { self.base = url; self.pidfile = pidfile }
 
   func applicationDidFinishLaunching(_ note: Notification) {
     try? String(getpid()).write(toFile: pidfile, atomically: true, encoding: .utf8)
+    session = URLSession(configuration: .ephemeral)
+    buildMenu()
+    refresh()
+    timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refresh() }
+  }
+
+  func applicationWillTerminate(_ note: Notification) { try? FileManager.default.removeItem(atPath: pidfile) }
+
+  // MARK: sessions -> windows
+
+  struct Active { let session: String; let agent: String }
+
+  func refresh() {
+    session.dataTask(with: base.appendingPathComponent("status")) { [weak self] data, _, _ in
+      guard let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+      let list = (obj["sessions"] as? [[String: Any]] ?? []).compactMap { s -> Active? in
+        guard let id = s["session"] as? String, !id.isEmpty else { return nil }
+        return Active(session: id, agent: s["agent"] as? String ?? "agent")
+      }
+      DispatchQueue.main.async { self?.reconcile(list) }
+    }.resume()
+  }
+
+  func reconcile(_ active: [Active]) {
+    var want: [String: String] = [:] // key -> title
+    if perSession {
+      for a in active where !dismissed.contains(a.session) {
+        if want.count >= Overlay.maxWindows { break }
+        want[a.session] = "\(a.agent) · \(a.session.prefix(8))"
+      }
+    }
+    // The combined window: always in combined mode, and in per-session mode
+    // while no session is active, so there is something to look at.
+    if (!perSession || want.isEmpty) && !dismissed.contains(Overlay.all) {
+      want[Overlay.all] = perSession ? "Turbella · waiting for an agent" : "Turbella · all sessions"
+    }
+    for key in windows.keys where want[key] == nil { close(key) }
+    for (key, title) in want {
+      if let w = windows[key] { w.panel.title = title } else { open(key, title: title) }
+    }
+  }
+
+  func pageURL(for key: String) -> URL {
+    var c = URLComponents(url: base, resolvingAgainstBaseURL: false)!
+    c.path = showViz ? "/viz" : "/"
+    var q = showViz ? [URLQueryItem(name: "overlay", value: "1")] : []
+    if key != Overlay.all && showViz { q.append(URLQueryItem(name: "session", value: key)) }
+    c.queryItems = q.isEmpty ? nil : q
+    return c.url!
+  }
+
+  // New windows stack down the right edge of the screen, then in a second column.
+  func frame(slot: Int) -> NSRect {
     let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
-    let size = NSSize(width: 360, height: 220)
-    let frame = NSRect(x: screen.maxX - size.width - 16, y: screen.maxY - size.height - 16,
-                       width: size.width, height: size.height)
+    let w: CGFloat = 320, h: CGFloat = 200, gap: CGFloat = 12
+    let perColumn = max(1, Int((screen.height - gap) / (h + gap)))
+    let col = slot / perColumn, row = slot % perColumn
+    return NSRect(x: screen.maxX - gap - w - CGFloat(col) * (w + gap),
+                  y: screen.maxY - gap - h - CGFloat(row) * (h + gap), width: w, height: h)
+  }
+
+  func open(_ key: String, title: String) {
+    let used = Set(windows.values.map(\.slot))
+    let slot = (0...).first { !used.contains($0) }!
     // A non-activating panel: clicks reach the page without pulling focus
     // away from the agent's window.
-    panel = NSPanel(contentRect: frame,
-                    styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
-                    backing: .buffered, defer: false)
-    panel.title = "Turbella"
+    let panel = NSPanel(contentRect: frame(slot: slot),
+                        styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
+                        backing: .buffered, defer: false)
+    panel.title = title
+    panel.identifier = NSUserInterfaceItemIdentifier(key)
     panel.appearance = NSAppearance(named: .darkAqua)
     panel.isFloatingPanel = true
     panel.level = .floating
@@ -62,35 +143,33 @@ final class Overlay: NSObject, NSApplicationDelegate, NSWindowDelegate {
     panel.hidesOnDeactivate = false
     panel.backgroundColor = .black
     panel.minSize = NSSize(width: 200, height: 120)
+    panel.isReleasedWhenClosed = false
     panel.delegate = self
-    panel.setFrameAutosaveName("TurbellaOverlay")
-
-    web = WKWebView(frame: panel.contentView!.bounds, configuration: WKWebViewConfiguration())
+    panel.alphaValue = opacity
+    panel.ignoresMouseEvents = clickThrough
+    let web = WKWebView(frame: panel.contentView!.bounds, configuration: WKWebViewConfiguration())
     web.autoresizingMask = [.width, .height]
     web.setValue(false, forKey: "drawsBackground")
     panel.contentView!.addSubview(web)
-    show(viz: true)
-    panel.alphaValue = defaults.object(forKey: "opacity") as? CGFloat ?? 1
+    web.load(URLRequest(url: pageURL(for: key)))
     panel.orderFrontRegardless()
-    buildMenu()
+    windows[key] = Floater(key: key, slot: slot, panel: panel, web: web)
   }
 
-  func applicationWillTerminate(_ note: Notification) { try? FileManager.default.removeItem(atPath: pidfile) }
-  func windowWillClose(_ note: Notification) { NSApp.terminate(nil) }
-
-  func pageURL(viz: Bool) -> URL {
-    var c = URLComponents(url: url, resolvingAgainstBaseURL: false)!
-    c.path = viz ? "/viz" : "/"
-    c.queryItems = viz ? [URLQueryItem(name: "overlay", value: "1")] : nil
-    return c.url!
+  func close(_ key: String) {
+    guard let w = windows.removeValue(forKey: key) else { return }
+    w.panel.delegate = nil
+    w.panel.close()
   }
 
-  func show(viz: Bool) {
-    onViz = viz
-    web.load(URLRequest(url: pageURL(viz: viz)))
-    nextItem?.isEnabled = viz
-    cycleItem?.isEnabled = viz
+  // The person closed a window: keep it closed until "Show all windows".
+  func windowWillClose(_ note: Notification) {
+    guard let key = (note.object as? NSPanel)?.identifier?.rawValue, windows[key] != nil else { return }
+    dismissed.insert(key)
+    windows.removeValue(forKey: key)
   }
+
+  // MARK: menu bar
 
   func buildMenu() {
     item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -103,51 +182,66 @@ final class Overlay: NSObject, NSApplicationDelegate, NSWindowDelegate {
       menu.addItem(m)
       return m
     }
-    _ = add("Visualiser", #selector(showViz))
-    _ = add("Timeline", #selector(showTimeline))
+    perSessionItem = add("One window per session", #selector(togglePerSession))
+    perSessionItem.state = perSession ? .on : .off
+    _ = add("Show all windows", #selector(showAll))
     menu.addItem(.separator())
+    _ = add("Visualiser", #selector(showVisualiser))
+    _ = add("Timeline", #selector(showTimeline))
     nextItem = add("Next look", #selector(nextLook))
     cycleItem = add("Cycle looks", #selector(toggleCycle))
     menu.addItem(.separator())
     lockItem = add("Click-through", #selector(toggleLock))
-    let opacity = NSMenuItem(title: "Opacity", action: nil, keyEquivalent: "")
+    let op = NSMenuItem(title: "Opacity", action: nil, keyEquivalent: "")
     let sub = NSMenu()
     for v in [1.0, 0.85, 0.7, 0.5] {
       let m = NSMenuItem(title: "\(Int(v * 100))%", action: #selector(setOpacity(_:)), keyEquivalent: "")
       m.target = self
       m.representedObject = v
-      m.state = abs(panel.alphaValue - v) < 0.01 ? .on : .off
+      m.state = abs(opacity - v) < 0.01 ? .on : .off
       sub.addItem(m)
       opacityItems.append(m)
     }
-    opacity.submenu = sub
-    menu.addItem(opacity)
-    _ = add("Show window", #selector(showWindow))
+    op.submenu = sub
+    menu.addItem(op)
     menu.addItem(.separator())
     _ = add("Quit Turbella overlay", #selector(quit), "q")
     item.menu = menu
   }
 
-  @objc func showViz() { show(viz: true) }
-  @objc func showTimeline() { show(viz: false) }
-  @objc func showWindow() { panel.orderFrontRegardless() }
+  func each(_ js: String) { for w in windows.values { w.web.evaluateJavaScript(js, completionHandler: nil) } }
+  func reloadAll() { for w in windows.values { w.web.load(URLRequest(url: pageURL(for: w.key))) } }
+
+  @objc func togglePerSession() {
+    defaults.set(!perSession, forKey: "perSession")
+    perSessionItem.state = perSession ? .on : .off
+    refresh()
+  }
+  @objc func showAll() {
+    dismissed.removeAll()
+    for w in windows.values { w.panel.orderFrontRegardless() }
+    refresh()
+  }
+  @objc func showVisualiser() { showViz = true; nextItem.isEnabled = true; cycleItem.isEnabled = true; reloadAll() }
+  @objc func showTimeline() { showViz = false; nextItem.isEnabled = false; cycleItem.isEnabled = false; reloadAll() }
   @objc func quit() { NSApp.terminate(nil) }
-  @objc func nextLook() { web.evaluateJavaScript("window.turbella.tools.next_look(); 0", completionHandler: nil) }
+  @objc func nextLook() { each("window.turbella.tools.next_look(); 0") }
   @objc func toggleCycle() {
-    web.evaluateJavaScript("window.turbella.tools.cycle_looks().cycling") { [weak self] v, _ in
-      self?.cycleItem.state = (v as? Bool ?? false) ? .on : .off
-    }
+    let on = cycleItem.state != .on
+    cycleItem.state = on ? .on : .off
+    each("window.turbella.tools.cycle_looks({ on: \(on) }); 0")
   }
   // Click-through lets the agent's window take clicks under the overlay; the
   // menu bar item turns it off again.
   @objc func toggleLock() {
-    panel.ignoresMouseEvents.toggle()
-    lockItem.state = panel.ignoresMouseEvents ? .on : .off
+    clickThrough.toggle()
+    lockItem.state = clickThrough ? .on : .off
+    for w in windows.values { w.panel.ignoresMouseEvents = clickThrough }
   }
   @objc func setOpacity(_ sender: NSMenuItem) {
     let v = sender.representedObject as? Double ?? 1
-    panel.alphaValue = v
     defaults.set(v, forKey: "opacity")
+    for w in windows.values { w.panel.alphaValue = v }
     for m in opacityItems { m.state = m === sender ? .on : .off }
   }
 }
@@ -158,6 +252,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSWindowDelegate {
 // queue; the terminal loop reads a snapshot under the lock.
 final class Feed: NSObject, URLSessionDataDelegate {
   let base: String
+  let run: String            // this wrapper's id; the hook copies it into the agent's events
+  var mine = Set<String>()   // sessions that carried it, for events that do not
   let lock = NSLock()
   let opened = Date().timeIntervalSince1970 * 1000
   var gauge = 0.0
@@ -169,8 +265,9 @@ final class Feed: NSObject, URLSessionDataDelegate {
   var pending = Data()
   var session: URLSession!
 
-  init(port: Int) {
+  init(port: Int, run: String) {
     base = "http://127.0.0.1:\(port)"
+    self.run = run
     super.init()
     session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
     connect()
@@ -189,7 +286,7 @@ final class Feed: NSObject, URLSessionDataDelegate {
   }
 
   func pollStatus() {
-    session.dataTask(with: URL(string: base + "/status")!) { [weak self] data, _, _ in
+    session.dataTask(with: URL(string: base + "/status?run=" + run)!) { [weak self] data, _, _ in
       guard let self, let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let g = obj["gauge"] as? Double else { return }
       self.lock.lock(); if g != self.gauge { self.gauge = g; self.version += 1 }; self.lock.unlock()
@@ -225,6 +322,9 @@ final class Feed: NSObject, URLSessionDataDelegate {
     let session = ev["session"] as? String ?? ""
     let key = "\(session)|\(tool ?? "")|\(ev["sig"] as? String ?? "")"
     lock.lock(); defer { lock.unlock() }
+    // Only this wrapper's agent: events it tagged, and others from its sessions.
+    if ev["run"] as? String == run { if !session.isEmpty { mine.insert(session) } }
+    else if session.isEmpty || !mine.contains(session) { return }
     if kind == "stop" {
       turns.remove(session)
       open = open.filter { !$0.hasPrefix(session + "|") }
@@ -453,6 +553,9 @@ func winsizeOf(_ fd: Int32) -> winsize? {
 }
 
 func runWrapped(port: Int, command: [String]) -> Int32 {
+  // The agent and its hooks inherit this; the hook copies it into each event.
+  let runId = String(UUID().uuidString.prefix(8)).lowercased()
+  setenv("TURBELLA_RUN", runId, 1)
   var cargs: [UnsafeMutablePointer<CChar>?] = command.map { strdup($0) } + [nil]
   // No terminal, or one too small for a strip: run the agent as it is.
   guard isatty(0) == 1, isatty(1) == 1, var ws = winsizeOf(1) else {
@@ -479,7 +582,7 @@ func runWrapped(port: Int, command: [String]) -> Int32 {
   tcsetattr(0, TCSANOW, &rawMode)
   signal(SIGWINCH) { _ in resized = 1 }
 
-  let feed = Feed(port: port)
+  let feed = Feed(port: port, run: runId)
   let w = Wrapper(master: master, rows: Int(ws.ws_row), cols: Int(ws.ws_col), feed: feed)
   w.start()
 

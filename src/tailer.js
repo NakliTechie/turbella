@@ -9,7 +9,7 @@ const MAX_FILES = 32;
 const MAX_READ = 4 * 1024 * 1024;
 
 export function createTailer({ onEvent, pollMs = 1000 }) {
-  const files = new Map(); // path -> { offset, partial }
+  const files = new Map(); // path -> { offset, partial, run }
   let timer = null;
 
   async function readNew(path, f) {
@@ -37,6 +37,7 @@ export function createTailer({ onEvent, pollMs = 1000 }) {
           kind: 'think',
           status: 'ok',
           dur_ms: rec.thinkingDurationMs,
+          run: f.run,
         });
       }
     } finally {
@@ -51,13 +52,15 @@ export function createTailer({ onEvent, pollMs = 1000 }) {
   }
 
   return {
-    async follow(path) {
-      if (typeof path !== 'string' || !path.endsWith('.jsonl') || files.has(path)) return;
+    // `run` tags the thinking events of an agent under `turbella run`.
+    async follow(path, run = null) {
+      if (typeof path !== 'string' || !path.endsWith('.jsonl')) return;
+      if (files.has(path)) { if (run) files.get(path).run = run; return; }
       let st;
       try { st = await stat(path); } catch { return; }
       if (!st.isFile()) return;
       if (files.size >= MAX_FILES) files.delete(files.keys().next().value);
-      files.set(path, { offset: st.size, partial: '' });
+      files.set(path, { offset: st.size, partial: '', run });
       if (!timer) timer = setInterval(poll, pollMs);
     },
     stop() {

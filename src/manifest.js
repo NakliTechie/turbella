@@ -60,12 +60,12 @@ export const MANIFEST = Object.freeze([
   },
   {
     name: 'overlay', place: 'daemon', effect: 'open', personOnly: false,
-    description: 'Start the daemon if needed and open the visualiser in a small always-on-top window (macOS) that floats over the agent, whether a terminal or a desktop app. Builds the native helper with swiftc on first use. Returns the pid and URL.',
+    description: 'Start the daemon if needed and open small always-on-top windows (macOS) that float over the agents, whether terminals or desktop apps: one per active agent session by default, or one for all sessions (a menu bar toggle). Builds the native helper with swiftc on first use. Returns the pid and URL.',
     inputSchema: none,
   },
   {
     name: 'run', place: 'daemon', effect: 'terminal', personOnly: true,
-    description: "Run an agent in this terminal under a one-line Turbella strip (gauge and current tool) pinned to the top row (macOS). Person-only: it takes over the person's terminal until the agent exits, so it is on the CLI and not offered to agents over MCP.",
+    description: "Run an agent in this terminal under a one-line Turbella strip (gauge and current tool for this agent only) pinned to the top row (macOS). Person-only: it takes over the person's terminal until the agent exits, so it is on the CLI and not offered to agents over MCP.",
     inputSchema: {
       type: 'object',
       properties: { command: { type: 'array', items: { type: 'string' }, description: 'The agent command and its arguments, e.g. ["claude"].' } },

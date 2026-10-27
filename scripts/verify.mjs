@@ -48,7 +48,7 @@ function killStateDaemon() {
   if (st) { try { process.kill(st.pid); } catch {} }
   return st;
 }
-const runHook = (payload) => execFileSync(process.execPath, [HOOK], { input: JSON.stringify(payload), encoding: 'utf8' });
+const runHook = (payload, env = {}) => execFileSync(process.execPath, [HOOK], { input: JSON.stringify(payload), encoding: 'utf8', env: { ...process.env, ...env } });
 
 // Read SSE events until `count` arrive or `ms` pass.
 async function readSSE(port, { count = 1, ms = 1500, headers = {} } = {}) {
@@ -331,6 +331,25 @@ async function main() {
   check('hermes: duration comes from extra', heEvs[1]?.dur_ms, 42);
   check('hermes: no prompt, output or error text', !JSON.stringify(heEvs).includes('SECRET'), true);
   check('hermes: session start prints nothing (stdout is a hook decision)', runHook(he('on_session_start', { platform: 'cli' })), '');
+
+  // Sessions and filters: one floating window per session, and `turbella run`
+  // strips that show only their own agent (TURBELLA_RUN).
+  daemonClear();
+  runHook({ hook_event_name: 'PostToolUseFailure', session_id: 'wrapped', tool_name: 'Bash', tool_input: { command: 'make' }, error: 'x' }, { TURBELLA_RUN: 'r1' });
+  runHook({ hook_event_name: 'PostToolUseFailure', session_id: 'wrapped', tool_name: 'Bash', tool_input: { command: 'make' }, error: 'x' }, { TURBELLA_RUN: 'r1' });
+  runHook({ hook_event_name: 'PostToolUse', session_id: 'other', tool_name: 'Read', tool_input: { file_path: '/a' } });
+  runHook({ hook_event_name: 'Stop', session_id: 'other' });
+  await sleep(150);
+  const st = async (q = '') => (await fetch(`http://127.0.0.1:${h.port}/status${q}`)).json();
+  const whole = await st();
+  check('sessions: status lists active sessions, newest first', whole.sessions.map((x) => x.session).join(','), 'other,wrapped');
+  check('sessions: the run tag comes through the hook', whole.sessions[1].run, 'r1');
+  check('sessions: a session whose last event is stop says so', whole.sessions[0].stopped, true);
+  const byRun = await st('?run=r1');
+  check('filter: ?run= counts only that wrapper\'s events', byRun.events === 2 && byRun.byKind.tool_fail === 2, true);
+  check('filter: ?session= counts only that session', (await st('?session=other')).events, 2);
+  check('filter: the gauge is per filter (failures in one session only)', byRun.gauge > (await st('?session=other')).gauge, true);
+  check('filter: a filtered status lists no sessions', byRun.sessions, undefined);
 
   daemonClear();
   runHook({ hook_event_name: 'UserPromptSubmit', session_id: 's', prompt: 'hello' });

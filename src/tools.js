@@ -46,6 +46,7 @@ async function emit({ kind = 'tool', status: evStatus = 'ok', tool = null, sessi
     sig: payload === undefined ? null : await contentHash(payload),
     ts: Date.now(),
     agent,
+    run: process.env.TURBELLA_RUN ?? null,
   };
   return { delivered: await deliver(event) };
 }

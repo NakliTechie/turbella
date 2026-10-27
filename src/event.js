@@ -10,6 +10,7 @@
 //   dur_ms  duration in ms, or null
 //   sig     sha256 of the tool arguments (tool) or the error text (tool_fail)
 //   target  sha256 of the file path an edit touched, or null
+//   run     id of the `turbella run` wrapper the agent runs under, or null
 //
 // Only hashes, never text: no file contents, prompts, tool output or thinking.
 
@@ -59,6 +60,7 @@ export function toEvent(raw) {
     dur_ms: num(raw.dur_ms),
     sig: HASH.test(raw.sig ?? '') ? raw.sig : null,
     target: HASH.test(raw.target ?? '') ? raw.target : null,
+    run: str(raw.run, 64),
   };
 }
 

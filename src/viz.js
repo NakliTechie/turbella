@@ -62,10 +62,14 @@ const opened = Date.now();
 const LABEL = { tool: 'ok', tool_fail: 'failed', permission: 'waiting for permission', think: 'thinking',
   subagent: 'subagent', stop: 'stopped', turn: 'new turn', notification: 'notification' };
 
+// ?session=<id> shows one session only: its sound, its gauge, its status line.
+const only = new URLSearchParams(location.search).get('session');
+
 const live = new EventSource('/events');
 live.onmessage = (m) => {
   let ev;
   try { ev = JSON.parse(m.data); } catch { return; }
+  if (only && ev.session !== only) return;
   events.push(ev);
   if (events.length > 5000) events.splice(0, events.length - 5000);
   // The backlog on connect feeds the gauge only; fresh events also make sound.

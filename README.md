@@ -84,8 +84,8 @@ the gauge; [docs/PLUGINS.md](docs/PLUGINS.md) is the contract, with Hermes as th
 
 ```
 turbella open                     # start the daemon if needed, open the visualiser
-turbella overlay                  # the visualiser in an always-on-top window (macOS, needs swiftc)
-turbella run claude               # any agent, with a gauge strip pinned to the terminal's top row
+turbella overlay                  # always-on-top windows, one per agent session (macOS, swiftc)
+turbella run claude               # any agent, with its own gauge strip on the terminal's top row
 turbella status                   # events, counts by kind, the gauge, as JSON
 turbella emit --kind tool_fail --tool Bash --payload '"exit 1"'   # send one event
 turbella replay <file.jsonl>      # counts and gauge for a recorded transcript

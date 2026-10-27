@@ -44,7 +44,7 @@ process.stdin.on('end', async () => {
     const profile = PROFILES[agent];
     const n = normalise(p);
     if (n.event === 'SessionStart') {
-      await deliver({ kind: 'ping', transcript: n.transcript, session: n.session });
+      await deliver({ kind: 'ping', transcript: n.transcript, session: n.session, run: process.env.TURBELLA_RUN ?? null });
       let st = readState();
       for (let i = 0; !st && i < 10; i++) { await sleep(100); st = readState(); }
       if (st) {
@@ -67,6 +67,8 @@ process.stdin.on('end', async () => {
         sig, target,
         transcript: n.transcript,
         call: typeof n.call === 'string' ? n.call.slice(0, 200) : null,
+        // Set by `turbella run` for the agent it wraps, so its strip shows only this agent.
+        run: process.env.TURBELLA_RUN ?? null,
       });
     }
   } catch { /* never fail loudly */ }
