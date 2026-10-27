@@ -25,7 +25,11 @@
   body.overlay .hud { top: 8px; left: 8px; right: 8px; padding: 4px 8px; gap: 6px; font-size: 11px; flex-wrap: wrap; }
   body.overlay .hud > a, body.overlay #preset { display: none; }
   body.overlay button { padding: 2px 7px; font-size: 11px; }
-  body.overlay .hud.quiet { opacity: 0.6; }
+  body.overlay .hud.quiet { opacity: 0.3; }
+  /* Hide bar: gone until the pointer is over the window. `pointer` is set by
+     the floating window, which sees the pointer even when the page does not. */
+  body.bar-hidden .hud, body.bar-hidden .hud.quiet { opacity: 0; }
+  body.pointer .hud.hud, body.bar-hidden .hud.hud:hover, body.overlay .hud.hud:hover { opacity: 1; }
   body.overlay #gaugeBar { width: 60px; }
   body.overlay #last { left: 8px; bottom: 6px; font-size: 11px; }
   button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -42,6 +46,7 @@
   <span id="preset">loading…</span>
   <button id="btnNext" data-tool="next_look">Next look</button>
   <button id="btnCycle" data-tool="cycle_looks" aria-pressed="false">Cycle</button>
+  <button id="btnBar" data-tool="set_toolbar" aria-pressed="false" title="Hide this bar until the pointer is over the window">Hide bar</button>
   <span>turbulence</span>
   <div id="gaugeBar"><div id="gaugeFill"></div></div>
   <span id="gaugeValue">0.00</span>

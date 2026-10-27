@@ -32,8 +32,19 @@ func fail(_ msg: String) -> Never {
 
 // One floating window: a panel holding the visualiser for one session, or for
 // all sessions together (key "*").
+// Tells the page when the pointer enters or leaves its window, which a
+// floating window that is not key does not report to the page itself.
+final class Hover: NSObject {
+  weak var web: WKWebView?
+  init(web: WKWebView) { self.web = web }
+  func set(_ on: Bool) { web?.evaluateJavaScript("document.body.classList.toggle('pointer', \(on)); 0", completionHandler: nil) }
+  @objc func mouseEntered(_ e: NSEvent) { set(true) }
+  @objc func mouseExited(_ e: NSEvent) { set(false) }
+}
+
 final class Floater {
   let key: String
+  var hover: Hover?
   let slot: Int
   let panel: NSPanel
   let web: WKWebView
@@ -53,6 +64,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSWindowDelegate {
   var nextItem: NSMenuItem!
   var lockItem: NSMenuItem!
   var perSessionItem: NSMenuItem!
+  var barItem: NSMenuItem!
   var opacityItems: [NSMenuItem] = []
   var session: URLSession!
   var timer: Timer?
@@ -152,8 +164,13 @@ final class Overlay: NSObject, NSApplicationDelegate, NSWindowDelegate {
     web.setValue(false, forKey: "drawsBackground")
     panel.contentView!.addSubview(web)
     web.load(URLRequest(url: pageURL(for: key)))
+    let hover = Hover(web: web)
+    panel.contentView!.addTrackingArea(NSTrackingArea(rect: .zero,
+      options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: hover, userInfo: nil))
     panel.orderFrontRegardless()
-    windows[key] = Floater(key: key, slot: slot, panel: panel, web: web)
+    let floater = Floater(key: key, slot: slot, panel: panel, web: web)
+    floater.hover = hover
+    windows[key] = floater
   }
 
   func close(_ key: String) {
@@ -190,6 +207,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSWindowDelegate {
     _ = add("Timeline", #selector(showTimeline))
     nextItem = add("Next look", #selector(nextLook))
     cycleItem = add("Cycle looks", #selector(toggleCycle))
+    barItem = add("Hide toolbars", #selector(toggleBars))
+    barItem.state = defaults.bool(forKey: "barHidden") ? .on : .off
     menu.addItem(.separator())
     lockItem = add("Click-through", #selector(toggleLock))
     let op = NSMenuItem(title: "Opacity", action: nil, keyEquivalent: "")
@@ -230,6 +249,13 @@ final class Overlay: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let on = cycleItem.state != .on
     cycleItem.state = on ? .on : .off
     each("window.turbella.tools.cycle_looks({ on: \(on) }); 0")
+  }
+  // Toolbars hide until the pointer is over a window; the page remembers it too.
+  @objc func toggleBars() {
+    let on = barItem.state != .on
+    barItem.state = on ? .on : .off
+    defaults.set(on, forKey: "barHidden")
+    each("window.turbella.tools.set_toolbar({ hidden: \(on) }); 0")
   }
   // Click-through lets the agent's window take clicks under the overlay; the
   // menu bar item turns it off again.

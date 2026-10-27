@@ -44,16 +44,31 @@ function cycleLooks({ on } = {}) {
   return { cycling: want };
 }
 
-const TOOLS = { next_look: () => nextLook(), cycle_looks: cycleLooks };
+// Hide bar: the controls stay hidden until the pointer is over the page. The
+// choice is remembered per browser, so every floating window shares it.
+function setToolbar({ hidden } = {}) {
+  const want = typeof hidden === 'boolean' ? hidden : !document.body.classList.contains('bar-hidden');
+  document.body.classList.toggle('bar-hidden', want);
+  $('btnBar').setAttribute('aria-pressed', String(want));
+  $('btnBar').textContent = want ? 'Show bar' : 'Hide bar';
+  try { localStorage.setItem('turbella.barHidden', want ? '1' : '0'); } catch {}
+  return { hidden: want };
+}
+
+const TOOLS = { next_look: () => nextLook(), cycle_looks: cycleLooks, set_toolbar: setToolbar };
 publishTools('viz', TOOLS);
 $('btnNext').addEventListener('click', () => TOOLS.next_look());
 $('btnCycle').addEventListener('click', () => TOOLS.cycle_looks());
+$('btnBar').addEventListener('click', () => TOOLS.set_toolbar());
 
 const params = new URLSearchParams(location.search);
 if (params.has('overlay')) document.body.classList.add('overlay');
 let savedCycle = null;
 try { savedCycle = localStorage.getItem('turbella.cycle'); } catch {}
 if (params.get('cycle') === '1' || (params.get('cycle') !== '0' && savedCycle === '1')) cycleLooks({ on: true });
+let savedBar = null;
+try { savedBar = localStorage.getItem('turbella.barHidden'); } catch {}
+if (savedBar === '1') setToolbar({ hidden: true });
 
 // ---- events --------------------------------------------------------------
 const signal = createSignal();

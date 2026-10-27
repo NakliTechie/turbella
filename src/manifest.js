@@ -137,6 +137,13 @@ export const MANIFEST = Object.freeze([
       type: 'object', properties: { on: { type: 'boolean' } }, additionalProperties: false,
     },
   },
+  {
+    name: 'set_toolbar', place: 'viz', effect: 'view', personOnly: false,
+    description: 'Hide the control bar until the pointer is over the page, or show it again. Omit `hidden` to toggle. Returns the new state.',
+    inputSchema: {
+      type: 'object', properties: { hidden: { type: 'boolean' } }, additionalProperties: false,
+    },
+  },
 ]);
 
 export const toolsFor = (place) => MANIFEST.filter((t) => t.place === place);
