@@ -14,7 +14,7 @@ mkdirSync(join(dist, 'guide'), { recursive: true });
 
 cpSync(join(root, 'site', 'index.html'), join(dist, 'index.html'));
 cpSync(join(root, 'site', '_headers'), join(dist, '_headers'));
-for (const f of ['windows.jpg', 'hero.png', 'strip.png', 'social.png', 'promo.mp4', 'promo-poster.jpg']) {
+for (const f of ['windows.jpg', 'hero.png', 'strip.png', 'social.png', 'promo.mp4', 'promo-poster.jpg', 'visualiser.jpg']) {
   cpSync(join(root, 'marketing', f), join(dist, f));
 }
 cpSync(join(root, 'guide', 'screenshots'), join(dist, 'guide', 'screenshots'), {

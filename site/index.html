@@ -57,10 +57,29 @@
     font: 14px/1.7 ui-monospace, Menlo, monospace; margin: 0 0 14px; }
   pre .c { color: rgba(232, 234, 238, 0.55); }
   ul.plain { color: var(--muted); padding-left: 20px; margin: 0 0 18px; }
+  h3 { font-size: 19px; margin: 28px 0 8px; }
+  ol.steps { margin: 0 0 8px; padding-left: 22px; }
+  ol.steps > li { margin: 0 0 14px; padding-left: 4px; }
+  ol.steps pre { margin-top: 8px; }
+  .table { overflow-x: auto; margin-top: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  th { font-size: 13px; color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  td code, li code, p code { font-size: 14px; background: rgba(20, 22, 26, 0.06); padding: 1px 5px; border-radius: 4px; }
   ul.plain li { margin: 4px 0; }
   footer { border-top: 1px solid var(--line); }
   footer .bar { font-size: 14px; color: var(--muted); flex-wrap: wrap; }
   footer a { color: var(--muted); }
+  /* On a phone each agent row becomes a block: name, command, what it does. */
+  @media (max-width: 640px) {
+    table, tbody, tr, td { display: block; width: 100%; }
+    table tr:first-child { display: none; }
+    tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
+    tr:last-child { border-bottom: 0; }
+    td { border: 0; padding: 3px 12px; }
+    td:first-child { font-weight: 600; }
+  }
   @media (max-width: 720px) {
     .two { grid-template-columns: 1fr; }
     .bar nav { gap: 12px; font-size: 14px; }
@@ -93,7 +112,7 @@
     <p>Every event becomes sound for the picture, though nothing plays aloud. A tool call is a pluck, a failure is a
       bass hit, thinking is a slow swell and a permission wait is a held note. The turbulence gauge, from 0 calm to 1
       stuck, adds noise and wobble as the agent gets stuck. A readout says what each agent is doing and for how long.</p>
-    <figure><img src="guide/screenshots/03-visualiser-session.jpg" alt="The Turbella visualiser with its gauge and status readout" loading="lazy">
+    <figure><img src="visualiser.jpg" alt="The Turbella visualiser with its gauge and status readout" loading="lazy">
       <figcaption>The visualiser at <code>/viz</code>, one session, with its gauge and status.</figcaption></figure>
   </section>
 
@@ -138,19 +157,40 @@
 
   <section id="install">
     <h2>Install</h2>
-    <p>Claude Code, from its plugin marketplace:</p>
+    <p>You need a Mac with <a href="https://nodejs.org/">Node.js 22</a> or later. Linux and Windows are not supported yet.</p>
+
+    <h3>Claude Code: two commands</h3>
+    <ol class="steps">
+      <li>In a terminal, add the plugin and install it:
 <pre>claude plugin marketplace add NakliTechie/turbella
-claude plugin install turbella@turbella</pre>
-    <p>Other agents, from a clone:</p>
-<pre><span class="c"># Cursor, opencode, pi, omp: writes the agent's plugin file</span>
-turbella install cursor
-<span class="c"># Codex, Copilot CLI, Hermes, dsh: prints the steps</span>
-turbella install hermes</pre>
-    <ul class="plain">
-      <li>Start a session; the visualiser opens at <code>http://127.0.0.1:7377/viz</code> within 5 seconds of the first hook.</li>
-      <li>On a Mac: <code>turbella overlay</code> for the floating windows, <code>turbella run claude</code> for the strip.</li>
-      <li>macOS and Node 22. Linux and Windows are not supported yet.</li>
-    </ul>
+claude plugin install turbella@turbella</pre></li>
+      <li>Start a new Claude Code session. The visualiser opens in your browser at
+        <code>http://127.0.0.1:7377/viz</code> within 5 seconds of the agent's first action.</li>
+    </ol>
+
+    <h3>Other agents: get the <code>turbella</code> command first</h3>
+    <ol class="steps">
+      <li>Clone the repository and put the command on your PATH:
+<pre>git clone https://github.com/NakliTechie/turbella
+cd turbella
+npm link</pre></li>
+      <li>Set up your agent, then restart it:
+        <div class="table"><table>
+          <tr><th>Agent</th><th>Run</th><th>What it does</th></tr>
+          <tr><td>Cursor, opencode, pi, omp</td><td><code>turbella install cursor</code> (or <code>opencode</code>, <code>pi</code>, <code>omp</code>)</td><td>Writes Turbella's hook or plugin file into the agent's settings folder.</td></tr>
+          <tr><td>Copilot CLI</td><td><code>copilot plugin install NakliTechie/turbella</code></td><td>Installs the same plugin Claude Code uses.</td></tr>
+          <tr><td>Codex</td><td><code>turbella install codex</code></td><td>Prints the two <code>codex plugin</code> commands to run; then trust the hooks with <code>/hooks</code> in Codex.</td></tr>
+          <tr><td>Hermes</td><td><code>turbella install hermes</code></td><td>Prints a <code>hooks:</code> block to paste into <code>~/.hermes/config.yaml</code>; approve the hooks when Hermes next starts.</td></tr>
+          <tr><td>dsh</td><td><code>turbella install dsh</code></td><td>Prints the <code>dsh plugin add</code> command for each profile.</td></tr>
+        </table></div></li>
+      <li>Open <code>http://127.0.0.1:7377/viz</code>, or run <code>turbella open</code>.</li>
+    </ol>
+
+    <h3>On a Mac, beside your agents</h3>
+<pre>turbella overlay        <span class="c"># a floating window per agent session</span>
+turbella run claude     <span class="c"># any agent, with its gauge on the terminal's top row</span></pre>
+    <p>To check it is running: <code>turbella status</code> prints the event count and the gauge. The
+      <a href="guide/">guide</a> explains every mark on screen.</p>
   </section>
 </main>
 <footer><div class="bar">
