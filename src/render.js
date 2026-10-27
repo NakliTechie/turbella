@@ -3,7 +3,7 @@
 // Draws one horizontal lane per agent and session. X axis is time. As the playhead moves,
 // events "arrive" and are painted as marks:
 //
-//   - tool        : small tick, hue by tool kind (Bash / Write / Read / …)
+//   - tool        : small tick, dark for edits and writes, grey for other tools
 //   - tool_fail   : red spike  (failure)
 //   - permission  : amber tick (permission wait)
 //   - think       : violet dot whose size grows with thinking time
@@ -12,44 +12,20 @@
 // A loop glyph marks a failure whose `sig` already failed in the last minute.
 
 // ---- palette (honest visuals; nothing decorative beyond the signal) ---------
+// Colour is kept for states only (failure, permission wait, thinking); tools
+// are told apart by ink weight. Values come from the page's tokens.
 
-const TOOL_COLOR = {
-  Bash: '#2563eb',      // blue
-  Write: '#16a34a',     // green
-  Read: '#7c3aed',      // violet
-  Edit: '#ca8a04',      // yellow
-  MultiEdit: '#ca8a04',
-  NotebookEdit: '#ca8a04',
-  apply_patch: '#ca8a04',
-  Glob: '#0891b2',      // cyan
-  Grep: '#0891b2',
-  Task: '#be185d',      // pink
-  mcp__: '#6366f1',     // indigo (any MCP tool)
-};
+const WRITE_TOOLS = /^(write|edit|multiedit|notebookedit|apply_patch|patch)$/i;
 
-const KIND = {
-  TOOL: '#64748b',       // slate
-  TOOL_FAIL: '#ef4444',  // red spike
-  PERMISSION: '#f59e0b', // amber
-  THINK: '#8b5cf6',      // violet pulse
-  STOP: '#475569',
-  NOTIFICATION: '#06b6d4',
-  SUBAGENT: '#84cc16',
-};
-
-function colorFor(event) {
-  if (event.kind === 'tool_fail') return KIND.TOOL_FAIL;
-  if (event.kind === 'tool') {
-    const t = event.tool || '';
-    if (t.startsWith('mcp__')) return TOOL_COLOR.mcp__;
-    return TOOL_COLOR[t] ?? KIND.TOOL;
+function colorFor(event, p) {
+  switch (event.kind) {
+    case 'tool_fail': return p.bad;
+    case 'tool': return WRITE_TOOLS.test(event.tool || '') ? p.ink : p.muted;
+    case 'permission': return p.warn;
+    case 'think': return p.think;
+    case 'stop': return p.ink;
+    default: return p.muted;
   }
-  if (event.kind === 'permission') return KIND.PERMISSION;
-  if (event.kind === 'think') return KIND.THINK;
-  if (event.kind === 'stop') return KIND.STOP;
-  if (event.kind === 'notification') return KIND.NOTIFICATION;
-  if (event.kind === 'subagent') return KIND.SUBAGENT;
-  return '#94a3b8';
 }
 
 // Returns true if this event's `sig` has appeared at least twice among the
@@ -155,6 +131,7 @@ export function createRenderer(canvas, opts = {}) {
     const muted = token('--muted', '#6b6b66');
     const line = token('--line', '#e5e5e2');
     const ink = token('--ink', '#1c1c1a');
+    const palette = { ink, muted, bad: token('--bad', '#dc2626'), warn: token('--warn', '#d97706'), think: token('--think', '#8b5cf6') };
     ctx.font = '11px system-ui, sans-serif';
     if (agents.length === 0) {
       ctx.fillStyle = muted;
@@ -199,7 +176,7 @@ export function createRenderer(canvas, opts = {}) {
     for (const e of eventsSoFar) {
       const cx = xFor(e.ts);
       const cy = laneY(laneOf(e));
-      const c = colorFor(e);
+      const c = colorFor(e, palette);
 
       if (e.kind === 'turn') {
         // a new prompt: a thin divider across the lane
