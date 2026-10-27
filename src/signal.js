@@ -10,6 +10,12 @@
 //   stop           everything fades fast
 //   turbulence     a noise floor and a wobble that grow with the gauge
 //
+// Between hooks the agent is still busy, so three sounds hold the gaps:
+//
+//   tool running   a steady tone from a tool's start to its end (2 minutes at most)
+//   turn open      a low working tone from a prompt until the session stops
+//   idle           a faint slow breath, so the picture never goes flat
+//
 // frame() returns 1,024 unsigned samples per channel centred on 128, the shape
 // a browser analyser produces, so the renderer cannot tell it from audio.
 
@@ -35,40 +41,88 @@ function voiceFor(e) {
   }
 }
 
+export const HOLD_MAX_MS = 120_000; // a tool held longer than this fades
+export const TURN_MAX_MS = 600_000; // a turn with no event for this long counts as over
+const HOLD_AMP = 30;
+const WORK_AMP = 16;
+const IDLE_AMP = 4;
+
+const callKey = (e) => `${e.session ?? ''}|${e.tool ?? ''}|${e.sig ?? ''}`;
+
 export function createSignal({ random = Math.random } = {}) {
   let voices = [];
   let turbulence = 0;
   let last = null;
+  let bed = IDLE_AMP; // the working or idle tone, eased toward its target
+  const held = new Map(); // call key -> { voice, since }
+  const turns = new Map(); // session -> ms of its latest event
   const mono = new Uint8Array(SAMPLES);
   const left = new Uint8Array(SAMPLES);
   const right = new Uint8Array(SAMPLES);
 
+  function release(key) {
+    const h = held.get(key);
+    if (!h) return;
+    h.voice.decay = 6;
+    held.delete(key);
+  }
+
   return {
-    hit(e) {
-      if (e.kind === 'stop') { for (const v of voices) v.decay = Math.max(v.decay, 4); return; }
+    hit(e, nowMs = last ?? 0) {
+      const session = e.session ?? '';
+      if (e.kind === 'stop') {
+        for (const v of voices) v.decay = Math.max(v.decay, 4);
+        for (const [k] of held) if (k.startsWith(`${session}|`)) release(k);
+        turns.delete(session);
+        return;
+      }
+      if (e.kind !== 'notification') turns.set(session, nowMs);
+      if (e.kind === 'tool' && e.status === 'waiting') {
+        const key = callKey(e);
+        release(key);
+        const voice = { amp: HOLD_AMP, freq: 24 + (hash(e.tool) % 24), decay: 0, noise: 0,
+          pan: ((hash(e.tool) % 100) / 100) * 2 - 1, phase: random() * TAU };
+        voices.push(voice);
+        held.set(key, { voice, since: nowMs });
+      } else if (e.kind === 'tool' || e.kind === 'tool_fail') {
+        const key = callKey(e);
+        if (held.has(key)) release(key);
+        else for (const k of held.keys()) if (k.startsWith(`${session}|${e.tool ?? ''}|`)) { release(k); break; }
+      }
       const v = voiceFor(e);
       if (v) voices.push({ ...v, phase: random() * TAU });
-      if (voices.length > 64) voices = voices.slice(-64);
+      if (voices.length > 64) {
+        const keep = new Set([...held.values()].map((h) => h.voice));
+        voices = [...voices.filter((x) => keep.has(x)), ...voices.filter((x) => !keep.has(x)).slice(-(64 - keep.size))];
+      }
     },
     setTurbulence(g) { turbulence = Math.min(1, Math.max(0, g || 0)); },
     get voices() { return voices.length; },
+    get running() { return held.size; },
+    get working() { return turns.size > 0; },
 
     // Advance to `nowMs` and fill the three channels.
     frame(nowMs) {
       const dt = last == null ? 0 : Math.max(0, (nowMs - last) / 1000);
       last = nowMs;
+      for (const [k, h] of held) if (nowMs - h.since > HOLD_MAX_MS) { h.voice.decay = 0.5; held.delete(k); }
+      for (const [s, t] of turns) if (nowMs - t > TURN_MAX_MS) turns.delete(s);
       for (const v of voices) {
         v.amp *= Math.exp(-v.decay * dt);
         v.noise *= Math.exp(-v.decay * 1.5 * dt);
         v.phase += v.freq * dt * 2;
       }
       voices = voices.filter((v) => v.amp > 0.5 || v.noise > 0.5);
+      const target = turns.size ? WORK_AMP : IDLE_AMP;
+      bed += (target - bed) * (1 - Math.exp(-1.5 * dt));
+      const breath = bed * (0.75 + 0.25 * Math.sin(nowMs / (turns.size ? 700 : 2200)));
       const floor = turbulence * 35;
       const wobble = turbulence * 25;
       for (let i = 0; i < SAMPLES; i++) {
         const x = (i / SAMPLES) * TAU;
-        let l = wobble * Math.sin(3 * x + nowMs / 300);
-        let r = wobble * Math.sin(3 * x + nowMs / 260);
+        const b = breath * Math.sin(2 * x + nowMs / 900);
+        let l = b + wobble * Math.sin(3 * x + nowMs / 300);
+        let r = b + wobble * Math.sin(3 * x + nowMs / 260);
         for (const v of voices) {
           const s = v.amp * Math.sin(v.freq * x + v.phase) + v.noise * (random() * 2 - 1);
           l += s * (1 - v.pan) / 2 * 2;

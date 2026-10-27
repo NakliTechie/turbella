@@ -52,11 +52,24 @@ live.onmessage = (m) => {
   if ((ev.ts ?? 0) < opened - 2000) return;
   signal.hit(ev);
   if (ev.kind === 'turn') nextLook();
-  if (ev.status !== 'waiting' || ev.kind === 'permission') {
-    $('last').textContent = [ev.tool, LABEL[ev.kind] ?? ev.kind].filter(Boolean).join(' · ');
-  }
+  const running = ev.kind === 'tool' && ev.status === 'waiting';
+  status = { text: [ev.tool, running ? 'running' : LABEL[ev.kind] ?? ev.kind].filter(Boolean).join(' · '),
+    since: Date.now() };
+  showStatus();
 };
-live.onerror = () => { $('last').textContent = 'reconnecting to the daemon…'; };
+live.onerror = () => { status = null; $('last').textContent = 'reconnecting to the daemon…'; };
+
+// The bottom line says what the agent is on and for how long, so a quiet
+// stretch (a long search, the model writing) still reads as work.
+let status = null;
+function showStatus() {
+  if (!status) return;
+  const s = Math.floor((Date.now() - status.since) / 1000);
+  const busy = signal.running > 0 || signal.working;
+  const tail = !busy || s < 2 ? '' : signal.running > 0 ? ` · ${s} s` : ` · working, ${s} s since`;
+  $('last').textContent = status.text + tail;
+}
+setInterval(showStatus, 1000);
 
 function updateGauge() {
   const g = gaugeSnapshot(events, { now: Date.now() });

@@ -138,7 +138,7 @@ async function main() {
   const sig = createSignal({ random: rnd });
   const quiet = loudness(sig.frame(0).timeByteArray);
   check('signal: 1,024 samples per channel', sig.frame(16).timeByteArrayL.length, SAMPLES);
-  check('signal: no events is near silence', quiet < 1, true);
+  check('signal: no events is a faint breath, never flat', quiet > 0.5 && quiet < 5, true);
   sig.hit({ kind: 'tool', status: 'ok', tool: 'Read' });
   const toolLoud = loudness(sig.frame(32).timeByteArray);
   const sig2 = createSignal({ random: rnd });
@@ -147,11 +147,33 @@ async function main() {
   const failLoud = loudness(sig2.frame(16).timeByteArray);
   check('signal: a tool call makes sound', toolLoud > 5, true);
   check('signal: a failure is louder than a tool call', failLoud > toolLoud, true);
-  check('signal: sound decays within 3 s', loudness(sig.frame(3032).timeByteArray) < 1, true);
+  sig.frame(3032);
+  check('signal: a pluck decays within 3 s', sig.voices, 0);
+  sig.hit({ kind: 'stop' });
+  sig.frame(6000);
   sig.setTurbulence(1);
-  check('signal: turbulence raises the floor', loudness(sig.frame(3048).timeByteArray) > 5, true);
+  check('signal: turbulence raises the floor', loudness(sig.frame(6016).timeByteArray) > 5, true);
+  sig.setTurbulence(0);
   sig.hit({ kind: 'stop' });
   check('signal: unknown or stop events add no voice', sig.voices, 0);
+
+  // A running tool and an open turn keep the picture moving between hooks.
+  const sig3 = createSignal({ random: rnd });
+  const idleLoud = loudness(sig3.frame(0).timeByteArray);
+  sig3.hit({ kind: 'turn', session: 's' }, 0);
+  sig3.hit({ kind: 'tool', status: 'waiting', tool: 'Grep', session: 's', sig: 'a' }, 0);
+  check('signal: a running tool holds its tone after 5 s', loudness(sig3.frame(5000).timeByteArray) > 10, true);
+  check('signal: the running tool is counted', sig3.running, 1);
+  sig3.hit({ kind: 'tool', status: 'ok', tool: 'Grep', session: 's', sig: 'a' }, 5000);
+  check('signal: the tool end releases it', sig3.running, 0);
+  const workLoud = loudness(sig3.frame(15000).timeByteArray);
+  check('signal: an open turn stays above idle', workLoud > idleLoud * 2, true);
+  sig3.hit({ kind: 'tool', status: 'waiting', tool: 'Bash', session: 's', sig: 'b' }, 15000);
+  sig3.frame(15000 + 121000);
+  check('signal: a tool held past 2 minutes is let go', sig3.running, 0);
+  sig3.hit({ kind: 'stop', session: 's' }, 136000);
+  check('signal: stop ends the turn', sig3.working, false);
+  check('signal: after stop it falls back to the idle breath', loudness(sig3.frame(150000).timeByteArray) < workLoud, true);
 
   // ---- daemon ------------------------------------------------------------------------
   const sock = useSock('d.sock');
