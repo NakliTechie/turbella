@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  A Claude Code plugin and a local page. macOS, Node 22. No account, no server, no telemetry.
+  A Claude Code plugin and a local page. macOS, Node 22. No account, no server, no telemetry. <a href="https://turbella.naklitechie.com">turbella.naklitechie.com</a>
 </p>
 
 <p align="center">
