@@ -30,6 +30,11 @@
      the floating window, which sees the pointer even when the page does not. */
   body.bar-hidden .hud, body.bar-hidden .hud.quiet { opacity: 0; }
   body.pointer .hud.hud, body.bar-hidden .hud.hud:hover, body.overlay .hud.hud:hover { opacity: 1; }
+  /* Just hidden with the pointer still inside: stay hidden until it leaves. */
+  body.bar-hidden.bar-held .hud.hud { opacity: 0; }
+  button.icon { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 22px; padding: 0 7px; }
+  button.icon svg { display: block; }
+  body.overlay button.icon { min-width: 24px; height: 19px; padding: 0 5px; }
   body.overlay #gaugeBar { width: 60px; }
   body.overlay #last { left: 8px; bottom: 6px; font-size: 11px; }
   button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -44,11 +49,11 @@
 <div class="hud" id="hud">
   <a href="/" title="Back to the timeline">Turbella</a>
   <span id="preset">loading…</span>
-  <button id="btnNext" data-tool="next_look">Next look</button>
-  <button id="btnCycle" data-tool="cycle_looks" aria-pressed="false">Cycle</button>
-  <button id="btnBar" data-tool="set_toolbar" aria-pressed="false" title="Hide this bar until the pointer is over the window">Hide bar</button>
-  <span>turbulence</span>
-  <div id="gaugeBar"><div id="gaugeFill"></div></div>
+  <button id="btnNext" class="icon" data-tool="next_look" aria-label="Next look" title="Next look"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3 2.5l7.5 5.5L3 13.5z" fill="currentColor"/><path d="M12.5 2.5v11" stroke="currentColor" stroke-width="1.8"/></svg></button>
+  <button id="btnCycle" class="icon" data-tool="cycle_looks" aria-pressed="false" aria-label="Cycle looks" title="Cycle looks every 30 s"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 7.5A5.5 5.5 0 0 1 12.4 4.2"/><path d="M12.8 1.2v3.2H9.6"/><path d="M13.5 8.5A5.5 5.5 0 0 1 3.6 11.8"/><path d="M3.2 14.8v-3.2h3.2"/></svg></button>
+  <button id="btnBar" class="icon" data-tool="set_toolbar" aria-pressed="false" aria-label="Hide bar" title="Hide this bar until the pointer comes back"><svg viewBox="0 0 24 16" width="16" height="11" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 8c3-4.5 6.7-7 11-7s8 2.5 11 7c-3 4.5-6.7 7-11 7S4 12.5 1 8z"/><circle cx="12" cy="8" r="3"/></svg></button>
+  <span id="gaugeLabel" title="turbulence">turb</span>
+  <div id="gaugeBar" title="turbulence: 0 calm, 1 stuck"><div id="gaugeFill"></div></div>
   <span id="gaugeValue">0.00</span>
 </div>
 <div id="last">waiting for the agent…</div>

@@ -44,16 +44,30 @@ function cycleLooks({ on } = {}) {
   return { cycling: want };
 }
 
-// Hide bar: the controls stay hidden until the pointer is over the page. The
-// choice is remembered per browser, so every floating window shares it.
+// Hide bar: the controls stay hidden until the pointer comes back over the
+// page. Hiding with the pointer inside holds the bar hidden until the pointer
+// leaves, so the click takes effect at once. The choice is remembered per
+// browser, so every floating window shares it.
 function setToolbar({ hidden } = {}) {
   const want = typeof hidden === 'boolean' ? hidden : !document.body.classList.contains('bar-hidden');
   document.body.classList.toggle('bar-hidden', want);
+  const inside = document.body.classList.contains('pointer') || $('hud').matches(':hover');
+  document.body.classList.toggle('bar-held', want && inside);
   $('btnBar').setAttribute('aria-pressed', String(want));
-  $('btnBar').textContent = want ? 'Show bar' : 'Hide bar';
+  $('btnBar').setAttribute('aria-label', want ? 'Show bar' : 'Hide bar');
+  $('btnBar').title = want ? 'Keep this bar showing' : 'Hide this bar until the pointer comes back';
   try { localStorage.setItem('turbella.barHidden', want ? '1' : '0'); } catch {}
   return { hidden: want };
 }
+
+// The floating window calls this when the pointer enters or leaves it (a
+// window without focus may not tell the page); the page's own events do the
+// same in a browser.
+window.turbellaPointer = (inside) => {
+  if (!inside) document.body.classList.remove('bar-held');
+  document.body.classList.toggle('pointer', inside);
+};
+document.addEventListener('mouseleave', () => window.turbellaPointer(false));
 
 const TOOLS = { next_look: () => nextLook(), cycle_looks: cycleLooks, set_toolbar: setToolbar };
 publishTools('viz', TOOLS);

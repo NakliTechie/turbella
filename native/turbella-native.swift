@@ -37,7 +37,7 @@ func fail(_ msg: String) -> Never {
 final class Hover: NSObject {
   weak var web: WKWebView?
   init(web: WKWebView) { self.web = web }
-  func set(_ on: Bool) { web?.evaluateJavaScript("document.body.classList.toggle('pointer', \(on)); 0", completionHandler: nil) }
+  func set(_ on: Bool) { web?.evaluateJavaScript("window.turbellaPointer && window.turbellaPointer(\(on)); 0", completionHandler: nil) }
   @objc func mouseEntered(_ e: NSEvent) { set(true) }
   @objc func mouseExited(_ e: NSEvent) { set(false) }
 }
