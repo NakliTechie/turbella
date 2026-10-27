@@ -9,10 +9,11 @@
 //
 // `effect` says what a call changes: `read` changes nothing; `view` changes
 // only what this page shows; `append` adds one event to the in-memory buffer
-// (no undo needed, it ages out of the gauge window); `open` opens a browser tab.
-// `config` changes another tool's settings file. Only `install` does that, and
-// it is person-only: it stays on the CLI and is never offered to agents over
-// MCP. Every other entry sets `personOnly: false` on purpose.
+// (no undo needed, it ages out of the gauge window); `open` opens a browser tab
+// or window. `config` changes another tool's settings file; `terminal` takes
+// over the person's terminal. Those two (`install`, `run`) are person-only:
+// they stay on the CLI and are never offered to agents over MCP. Every other
+// entry sets `personOnly: false` on purpose.
 //
 // scripts/verify.mjs checks parity: the CLI, the MCP tool list and the page's
 // controls each match this list.
@@ -55,6 +56,21 @@ export const MANIFEST = Object.freeze([
     name: 'open', place: 'daemon', effect: 'open', personOnly: false,
     description: 'Start the daemon if needed and open the visualiser in the default browser (it falls back to the timeline without WebGL 2). Returns the URL.',
     inputSchema: none,
+  },
+  {
+    name: 'overlay', place: 'daemon', effect: 'open', personOnly: false,
+    description: 'Start the daemon if needed and open the visualiser in a small always-on-top window (macOS) that floats over the agent, whether a terminal or a desktop app. Builds the native helper with swiftc on first use. Returns the pid and URL.',
+    inputSchema: none,
+  },
+  {
+    name: 'run', place: 'daemon', effect: 'terminal', personOnly: true,
+    description: "Run an agent in this terminal under a one-line Turbella strip (gauge and current tool) pinned to the top row (macOS). Person-only: it takes over the person's terminal until the agent exits, so it is on the CLI and not offered to agents over MCP.",
+    inputSchema: {
+      type: 'object',
+      properties: { command: { type: 'array', items: { type: 'string' }, description: 'The agent command and its arguments, e.g. ["claude"].' } },
+      required: ['command'],
+      additionalProperties: false,
+    },
   },
 
   {
@@ -112,6 +128,13 @@ export const MANIFEST = Object.freeze([
     name: 'next_look', place: 'viz', effect: 'view', personOnly: false,
     description: 'Blend the visualiser to another preset now, instead of waiting for the next turn.',
     inputSchema: none,
+  },
+  {
+    name: 'cycle_looks', place: 'viz', effect: 'view', personOnly: false,
+    description: 'Turn cycling on or off: while on, the visualiser blends to another preset every 30 seconds. Omit `on` to toggle. Returns the new state.',
+    inputSchema: {
+      type: 'object', properties: { on: { type: 'boolean' } }, additionalProperties: false,
+    },
   },
 ]);
 

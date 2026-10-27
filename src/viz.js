@@ -31,9 +31,29 @@ function nextLook(blendSeconds = 2.7) {
   return { preset: name };
 }
 
-const TOOLS = { next_look: () => nextLook() };
+// Cycle mode blends to another look every 30 s. ?cycle=1 starts it on; the
+// choice is remembered per browser.
+const CYCLE_MS = 30_000;
+let cycleTimer = null;
+function cycleLooks({ on } = {}) {
+  const want = typeof on === 'boolean' ? on : !cycleTimer;
+  clearInterval(cycleTimer);
+  cycleTimer = want ? setInterval(() => nextLook(), CYCLE_MS) : null;
+  $('btnCycle').setAttribute('aria-pressed', String(want));
+  try { localStorage.setItem('turbella.cycle', want ? '1' : '0'); } catch {}
+  return { cycling: want };
+}
+
+const TOOLS = { next_look: () => nextLook(), cycle_looks: cycleLooks };
 publishTools('viz', TOOLS);
 $('btnNext').addEventListener('click', () => TOOLS.next_look());
+$('btnCycle').addEventListener('click', () => TOOLS.cycle_looks());
+
+const params = new URLSearchParams(location.search);
+if (params.has('overlay')) document.body.classList.add('overlay');
+let savedCycle = null;
+try { savedCycle = localStorage.getItem('turbella.cycle'); } catch {}
+if (params.get('cycle') === '1' || (params.get('cycle') !== '0' && savedCycle === '1')) cycleLooks({ on: true });
 
 // ---- events --------------------------------------------------------------
 const signal = createSignal();

@@ -4,8 +4,8 @@
 // Each handler takes the tool's input object and resolves to a JSON-ready
 // result, or throws an Error whose message is fit to show.
 
-import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -76,6 +76,64 @@ async function open() {
   return { url, opened };
 }
 
+// The native helper (native/turbella-native.swift): built with the system
+// swiftc into ~/.turbella-native on first use, and again when the source is
+// newer than the binary.
+const NATIVE_SRC = fileURLToPath(new URL('../native/turbella-native.swift', import.meta.url));
+const NATIVE_DIR = join(homedir(), '.turbella-native');
+const NATIVE_BIN = join(NATIVE_DIR, 'turbella-native');
+const OVERLAY_PID = join(NATIVE_DIR, 'overlay.pid');
+
+function nativeHelper() {
+  if (process.platform !== 'darwin') throw new Error('the overlay and run need macOS for now');
+  if (existsSync(NATIVE_BIN) && statSync(NATIVE_BIN).mtimeMs >= statSync(NATIVE_SRC).mtimeMs) return NATIVE_BIN;
+  mkdirSync(NATIVE_DIR, { recursive: true });
+  process.stderr.write('turbella: building the native helper with swiftc (once, about 10 s)\n');
+  const tmp = `${NATIVE_BIN}.${process.pid}.tmp`;
+  const r = spawnSync('swiftc', ['-O', '-swift-version', '5', '-o', tmp, NATIVE_SRC], { stdio: ['ignore', 'ignore', 'pipe'] });
+  if (r.error) throw new Error('swiftc not found; install the Xcode command line tools (xcode-select --install)');
+  if (r.status !== 0) throw new Error(`swiftc failed:\n${String(r.stderr).slice(0, 2000)}`);
+  renameSync(tmp, NATIVE_BIN);
+  return NATIVE_BIN;
+}
+
+function overlayPid() {
+  try {
+    const pid = Number(readFileSync(OVERLAY_PID, 'utf8'));
+    process.kill(pid, 0);
+    return pid;
+  } catch { return null; }
+}
+
+async function overlay() {
+  const bin = nativeHelper();
+  const url = `http://127.0.0.1:${(await ensureDaemon()).port}`;
+  const running = overlayPid();
+  if (running) return { pid: running, url, already: true };
+  const child = spawn(bin, ['overlay', url, OVERLAY_PID], { stdio: 'ignore', detached: true });
+  await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
+  child.unref();
+  writeFileSync(OVERLAY_PID, String(child.pid));
+  return { pid: child.pid, url };
+}
+
+// Runs in the foreground with this terminal; resolves to the agent's exit code.
+async function run({ command } = {}) {
+  if (!Array.isArray(command) || !command.length) throw new Error('run needs a command, e.g. turbella run claude');
+  const bin = nativeHelper();
+  const { port } = await ensureDaemon();
+  const child = spawn(bin, ['run', String(port), ...command], { stdio: 'inherit' });
+  // Ctrl-C reaches the agent through its terminal; this process waits it out.
+  const ignore = () => {};
+  process.on('SIGINT', ignore);
+  const code = await new Promise((resolve) => {
+    child.once('error', () => resolve(127));
+    child.once('exit', (c, sig) => resolve(c ?? 128));
+  });
+  process.off('SIGINT', ignore);
+  return { exit: code };
+}
+
 const HOOK = fileURLToPath(new URL('../bin/turbella-hook', import.meta.url));
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 // Cursor events Turbella listens to. preToolUse and subagentStart are left out:
@@ -115,7 +173,7 @@ async function install({ agent }) {
   return { agent, run: steps };
 }
 
-export const HANDLERS = Object.freeze({ status, emit, replay, open, install });
+export const HANDLERS = Object.freeze({ status, emit, replay, open, overlay, run, install });
 
 // Fail at import if the manifest and the handlers drift apart.
 for (const t of toolsFor('daemon')) {

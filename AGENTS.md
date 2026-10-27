@@ -9,6 +9,8 @@ happen, with a gauge for when the agent is stuck. `README.md` covers use.
 - `hooks/hooks.json`, `.claude-plugin/` — the plugin: which Claude Code hooks run.
 - `bin/turbella-hook` — runs per hook; hashes what names the call and sends one event.
 - `bin/turbella` — the CLI; `bin/turbella-mcp` — the same tools over MCP (stdio).
+- `native/turbella-native.swift` — macOS helper for `overlay` (floating window) and `run`
+  (terminal strip); built with the system swiftc into `~/.turbella-native` on first use.
 - `src/daemon.js` — receives events on a Unix socket; serves the page and its stream on 127.0.0.1.
 - `src/event.js` — the event record and the only place events are built from input.
 - `src/transcript.js`, `src/reader.js` — Claude Code transcripts to events, for replay.
@@ -26,7 +28,8 @@ happen, with a gauge for when the agent is stuck. `README.md` covers use.
 - **One manifest.** A new command goes in `src/manifest.js` with a handler in
   `src/tools.js` (CLI and MCP) or in the page's `TOOLS` table, plus a `data-tool`
   attribute on its control. `npm run verify` fails when they drift.
-- **No dependencies.** Node 22 built-ins only.
+- **No dependencies.** Node 22 built-ins only; the native helper uses only Apple's
+  frameworks and the system swiftc. Commit source, never a built binary.
 - **Fixtures are synthetic** and use Claude Code's real record shape. Real transcripts
   hold secrets; never commit one.
 
