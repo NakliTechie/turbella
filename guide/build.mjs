@@ -9,6 +9,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
+// `--site <dir>`: write the microsite's copy into <dir> (site/build.mjs), whose
+// back links lead to the product page instead of the app's own pages.
+const siteOut = process.argv.includes('--site') ? process.argv[process.argv.indexOf('--site') + 1] : null;
+const BACK = siteOut
+  ? '<a href="../">← Turbella</a> · <a href="https://github.com/NakliTechie/turbella">GitHub</a>'
+  : '<a href="../">← Timeline</a> · <a href="../viz">Visualiser</a>';
 
 // slug -> [title, one-line description]
 const CAPTIONS = {
@@ -112,7 +118,7 @@ const html = `<!doctype html>
   <input id="q" type="search" placeholder="Search  ( / )" aria-label="Search the guide">
 </header>
 <main>
-  <p class="back"><a href="../">← Timeline</a> · <a href="../viz">Visualiser</a></p>
+  <p class="back">${BACK}</p>
   ${sections}
   <p id="none" hidden>No matches.</p>
 </main>
@@ -179,7 +185,7 @@ const html = `<!doctype html>
 </html>
 `;
 
-writeFileSync(join(here, 'index.html'), html);
+writeFileSync(join(siteOut ?? here, 'index.html'), html);
 const shots = Object.keys(CAPTIONS).length - missing.length;
 console.log(`guide/index.html: ${SECTIONS.length} sections, ${shots} screenshots` + (missing.length ? `; missing: ${missing.join(', ')}` : ''));
 if (missing.length) process.exitCode = 1;

@@ -7,3 +7,4 @@ node_modules/
 .venv/
 __pycache__/
 /.claude/skills/
+/site/dist

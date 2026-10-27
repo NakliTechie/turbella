@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turbella · let your coding agent mesmerise you</title>
+<meta name="description" content="Turbella plays your coding agents' tool calls, failures and permission waits through MilkDrop presets, with a gauge for when one is stuck. Local only, free and MIT.">
+<meta property="og:title" content="Turbella">
+<meta property="og:description" content="Remember Winamp? Remember MilkDrop? Let your coding agent mesmerise you: every tool call, failure and permission wait, live, with a gauge for when it is stuck.">
+<meta property="og:url" content="https://turbella.naklitechie.com/">
+<meta property="og:image" content="https://turbella.naklitechie.com/social.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://turbella.naklitechie.com/social.png">
+<style>
+  /* Dense direction, light: the app's own tokens (web/turbella.html). */
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --line: rgba(20, 22, 26, 0.1);
+    --ink: #14161a; --muted: rgba(20, 22, 26, 0.62); --faint: rgba(20, 22, 26, 0.4);
+    --accent: #2563eb; --warn: #d97706; --bad: #dc2626; --think: #8b5cf6;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.6 system-ui, -apple-system, sans-serif; }
+  a { color: var(--accent); }
+  header { position: sticky; top: 0; z-index: 2; background: rgba(245, 246, 248, 0.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line); }
+  .bar { max-width: 1080px; margin: 0 auto; padding: 12px 20px; display: flex; align-items: center; gap: 20px; }
+  .bar b { font-size: 17px; letter-spacing: 0.02em; }
+  .bar nav { margin-left: auto; display: flex; gap: 18px; font-size: 15px; }
+  .bar nav a { color: var(--muted); text-decoration: none; }
+  .bar nav a:hover { color: var(--ink); }
+  main { max-width: 1080px; margin: 0 auto; padding: 0 20px 64px; }
+  .hero { padding: 64px 0 28px; }
+  .eyebrow { font-size: 18px; color: var(--accent); font-weight: 600; margin: 0 0 10px; }
+  h1 { font-size: clamp(36px, 6vw, 60px); line-height: 1.08; letter-spacing: -0.025em; margin: 0 0 18px; max-width: 16ch; }
+  .lede { font-size: 20px; color: var(--muted); max-width: 60ch; margin: 0 0 28px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn { display: inline-block; padding: 11px 18px; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 16px; }
+  .btn.primary { background: var(--ink); color: #fff; }
+  .btn.ghost { border: 1px solid var(--line); color: var(--ink); background: var(--panel); }
+  .meta { font-size: 14px; color: var(--muted); }
+  .video { margin: 36px 0 8px; border-radius: 14px; overflow: hidden; background: #000; box-shadow: 0 18px 48px rgba(20, 22, 26, 0.16); }
+  .video video { display: block; width: 100%; height: auto; }
+  section { padding: 48px 0 8px; border-top: 1px solid var(--line); margin-top: 48px; }
+  h2 { font-size: 28px; letter-spacing: -0.015em; margin: 0 0 10px; }
+  section > p { color: var(--muted); max-width: 64ch; margin: 0 0 22px; }
+  figure { margin: 0 0 18px; }
+  figure img { display: block; width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); }
+  figcaption { font-size: 14px; color: var(--muted); margin-top: 8px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .marks { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 0 0 22px; padding: 0; list-style: none; }
+  .marks li { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 15px; }
+  .marks i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: 1px; }
+  .agents { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 18px; padding: 0; list-style: none; }
+  .agents li { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 6px 14px; font-size: 15px; }
+  pre { background: var(--ink); color: #e8eaee; border-radius: 10px; padding: 16px 18px; overflow-x: auto;
+    font: 14px/1.7 ui-monospace, Menlo, monospace; margin: 0 0 14px; }
+  pre .c { color: rgba(232, 234, 238, 0.55); }
+  ul.plain { color: var(--muted); padding-left: 20px; margin: 0 0 18px; }
+  ul.plain li { margin: 4px 0; }
+  footer { border-top: 1px solid var(--line); }
+  footer .bar { font-size: 14px; color: var(--muted); flex-wrap: wrap; }
+  footer a { color: var(--muted); }
+  @media (max-width: 720px) {
+    .two { grid-template-columns: 1fr; }
+    .bar nav { gap: 12px; font-size: 14px; }
+    .hero { padding-top: 40px; }
+  }
+</style>
+<header><div class="bar">
+  <b>Turbella</b>
+  <nav><a href="guide/">Guide</a><a href="https://github.com/NakliTechie/turbella/blob/main/docs/PLUGINS.md">Plugins</a><a href="https://github.com/NakliTechie/turbella">GitHub</a></nav>
+</div></header>
+<main>
+  <div class="hero">
+    <p class="eyebrow">Remember Winamp? Remember MilkDrop?</p>
+    <h1>Let your coding agent mesmerise you.</h1>
+    <p class="lede">Turbella plays your coding agents' tool calls, failures and permission waits through MilkDrop
+      presets, with a gauge for when one is stuck. It runs on your Mac, with no account, no server and no telemetry.</p>
+    <div class="cta">
+      <a class="btn primary" href="#install">Install</a>
+      <a class="btn ghost" href="https://github.com/NakliTechie/turbella">View on GitHub</a>
+      <span class="meta">v0.1.0 · free and open source · MIT</span>
+    </div>
+    <div class="video">
+      <video src="promo.mp4" poster="promo-poster.jpg" controls playsinline preload="metadata"
+        aria-label="Turbella promo: the visualiser, the timeline and the floating windows"></video>
+    </div>
+  </div>
+
+  <section>
+    <h2>A visualiser driven by your agent</h2>
+    <p>Every event becomes sound for the picture, though nothing plays aloud. A tool call is a pluck, a failure is a
+      bass hit, thinking is a slow swell and a permission wait is a held note. The turbulence gauge, from 0 calm to 1
+      stuck, adds noise and wobble as the agent gets stuck. A readout says what each agent is doing and for how long.</p>
+    <figure><img src="guide/screenshots/03-visualiser-session.jpg" alt="The Turbella visualiser with its gauge and status readout" loading="lazy">
+      <figcaption>The visualiser at <code>/viz</code>, one session, with its gauge and status.</figcaption></figure>
+  </section>
+
+  <section>
+    <h2>The plain record</h2>
+    <p>The timeline shows one lane per agent session. Each tool call is a tick, dark for edits and grey for the rest.</p>
+    <ul class="marks">
+      <li><i style="background:var(--bad)"></i>A failure is a red spike; the same failure again gets a repeat mark.</li>
+      <li><i style="background:var(--warn)"></i>A permission wait is amber.</li>
+      <li><i style="background:var(--think)"></i>Thinking is a violet dot, larger for longer.</li>
+      <li><i style="background:var(--line)"></i>The silence since the last event is shaded while live.</li>
+    </ul>
+    <figure><img src="hero.png" alt="The Turbella timeline with three identical test failures marked as a repeat" loading="lazy">
+      <figcaption>The same test failing three times, then a permission wait.</figcaption></figure>
+  </section>
+
+  <section>
+    <h2>Beside your agents (macOS)</h2>
+    <p><code>turbella overlay</code> opens a small always-on-top window for each agent session, each with its own
+      picture, gauge and current action. <code>turbella run &lt;agent&gt;</code> runs any terminal agent with its own
+      gauge pinned to the terminal's top row.</p>
+    <figure><img src="windows.jpg" alt="A terminal under turbella run and eight floating windows, one per agent session" loading="lazy">
+      <figcaption>Window frames composed around real renders of eight demo sessions.</figcaption></figure>
+    <figure><img src="strip.png" alt="The strip on a terminal's top row: the gauge and Bash running" loading="lazy">
+      <figcaption>The strip on the terminal's top row.</figcaption></figure>
+  </section>
+
+  <section>
+    <h2>Works with the agents you use</h2>
+    <ul class="agents">
+      <li>Claude Code</li><li>Codex</li><li>Copilot CLI</li><li>Cursor</li><li>Hermes</li>
+      <li>opencode</li><li>pi</li><li>omp</li><li>dsh</li>
+    </ul>
+    <p>Any other app can send events and read the gauge; <a href="https://github.com/NakliTechie/turbella/blob/main/docs/PLUGINS.md">docs/PLUGINS.md</a> is the contract.</p>
+  </section>
+
+  <section>
+    <h2>What leaves your machine</h2>
+    <p>Nothing. Events carry tool names, statuses, durations and SHA-256 hashes. Prompts, file contents, tool output,
+      error text and thinking text never leave the hook. The daemon listens on a Unix socket and on 127.0.0.1 only.</p>
+  </section>
+
+  <section id="install">
+    <h2>Install</h2>
+    <p>Claude Code, from its plugin marketplace:</p>
+<pre>claude plugin marketplace add NakliTechie/turbella
+claude plugin install turbella@turbella</pre>
+    <p>Other agents, from a clone:</p>
+<pre><span class="c"># Cursor, opencode, pi, omp: writes the agent's plugin file</span>
+turbella install cursor
+<span class="c"># Codex, Copilot CLI, Hermes, dsh: prints the steps</span>
+turbella install hermes</pre>
+    <ul class="plain">
+      <li>Start a session; the visualiser opens at <code>http://127.0.0.1:7377/viz</code> within 5 seconds of the first hook.</li>
+      <li>On a Mac: <code>turbella overlay</code> for the floating windows, <code>turbella run claude</code> for the strip.</li>
+      <li>macOS and Node 22. Linux and Windows are not supported yet.</li>
+    </ul>
+  </section>
+</main>
+<footer><div class="bar">
+  <span>Turbella v0.1.0 · MIT · by NakliTechie</span>
+  <a href="https://github.com/NakliTechie/turbella/releases/tag/v0.1.0">Release notes</a>
+  <a href="guide/">Guide</a>
+  <a href="https://github.com/NakliTechie/turbella">GitHub</a>
+</div></footer>
+</html>

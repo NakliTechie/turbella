@@ -1,0 +1,13 @@
+{
+  // turbella.naklitechie.com: assets-only Worker serving the microsite built by
+  // site/build.mjs. Deployed by Cloudflare Workers Builds on every push to main
+  // (build command: node site/build.mjs; deploy command: npx wrangler deploy).
+  // account_id pinned on purpose: this machine has more than one Cloudflare account.
+  "name": "turbella",
+  "account_id": "62231b040ed00c96cdcf3a4541eab958",
+  "compatibility_date": "2026-10-04",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "turbella.naklitechie.com", "custom_domain": true }],
+  "assets": { "directory": "site/dist", "html_handling": "auto-trailing-slash" }
+}
