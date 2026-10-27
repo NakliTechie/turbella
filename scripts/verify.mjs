@@ -417,10 +417,12 @@ async function main() {
   dev('tool/result', 1400, { turn: 1, step: 1, message: { role: 'tool', toolCallId: 'k1', isError: true, content: [{ type: 'text', text: 'SECRET-ERR' }] }, error: { name: 'Exit', code: '2', reason: 'SECRET' } });
   dev('tool/call', 1500, { turn: 1, step: 2, callId: 'k2', name: 'read', arguments: '{"path":"/a.js"}' });
   dev('tool/result', 1550, { turn: 1, step: 2, message: { role: 'tool', toolCallId: 'k2', content: [] } });
+  dev('tool/call', 1560, { turn: 1, step: 3, callId: 'k3', name: 'bash', arguments: '{"command":"ls /nope"}' });
+  dev('tool/result', 1580, { turn: 1, step: 3, message: { role: 'tool', toolCallId: 'k3', content: [{ type: 'text', text: 'ls: /nope: SECRET\n[exit code: 1]' }] } });
   dev('turn/end', 1600, { turn: 1, reason: { kind: 'done' } });
   await sleep(300);
-  const dshEvs = (await readSSE(h.port, { count: 6 })).map((x) => x.ev);
-  check('dsh: turn, start, failure, start, end, stop in order', shape(dshEvs), 'turn,tool*,tool_fail,tool*,tool,stop');
+  const dshEvs = (await readSSE(h.port, { count: 8 })).map((x) => x.ev);
+  check('dsh: turn, start, failure, start, end, a non-zero shell exit fails, stop', shape(dshEvs), 'turn,tool*,tool_fail,tool*,tool,tool*,tool_fail,stop');
   check('dsh: lane, session, durations from the log; no text', dshEvs.every((e) => e.agent === 'dsh' && e.session === 'dsh1') && dshEvs[2].dur_ms === 300 && dshEvs[4].dur_ms === 50 && !JSON.stringify(dshEvs).includes('SECRET'), true);
 
   daemonClear();
