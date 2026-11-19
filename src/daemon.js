@@ -70,8 +70,10 @@ function resetIdle() {
   idleTimer = setTimeout(() => (clients.size ? resetIdle() : stop()), idleMs);
 }
 
-function send(res, id, ev) {
-  if (!res.write(`id: ${id}\ndata: ${JSON.stringify(ev)}\n\n`) && res.writableLength > MAX_QUEUED) {
+// replay is the backlog sent when a page connects: it is bounded by MAX_EVENTS
+// and always queues in one burst, so only live events count against MAX_QUEUED.
+function send(res, id, ev, replay = false) {
+  if (!res.write(`id: ${id}\ndata: ${JSON.stringify(ev)}\n\n`) && !replay && res.writableLength > MAX_QUEUED) {
     clients.delete(res);
     res.destroy();
   }
@@ -217,7 +219,7 @@ async function handleHttp(req, res) {
     const last = Number(req.headers['last-event-id']) || 0;
     const from = last < nextId ? last : 0;
     const filter = parseFilter(req.url);
-    for (const { id, ev } of events) if (id > from && matches(filter, ev)) send(res, id, ev);
+    for (const { id, ev } of events) if (id > from && matches(filter, ev)) send(res, id, ev, true);
     clients.set(res, filter);
     req.on('close', () => clients.delete(res));
     resetIdle();

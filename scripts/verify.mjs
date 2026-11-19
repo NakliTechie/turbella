@@ -362,6 +362,14 @@ async function main() {
   const streamed = (await readSSE(h.port, { count: 3, ms: 800, path: '/events?session=other' })).map((x) => x.ev);
   check('filter: /events?session= streams only that session, backlog included', streamed.length === 2 && streamed.every((e) => e.session === 'other'), true);
 
+  // A full backlog (10,000 events, over 1 MiB) must not get the page dropped:
+  // the combined window connects with no filter and replays all of it.
+  daemonClear();
+  for (let i = 0; i < 10500; i++) await writeEvent({ kind: 'tool', status: 'ok', tool: 'Bash', session: 'bulk' });
+  await sleep(300);
+  const bulk = await readSSE(h.port, { count: 10000, ms: 4000 });
+  check('backlog: an unfiltered page connects and gets the full backlog', bulk.length >= 9990, true);
+
   // A busy session stays listed past 15 minutes; a stopped one does not.
   daemonClear();
   const old = Date.now() - 20 * 60_000;
