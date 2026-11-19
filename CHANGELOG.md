@@ -2,6 +2,14 @@
 
 All notable changes to Turbella. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+- One window, not one per process: the overlay defaults to a single combined window, and a
+  session start opens that window once (a lock covers sessions starting together). Without
+  macOS it opens a single browser tab, locked the same way. Per-session windows stay in the
+  menu (`One window per session`); `TURBELLA_OVERLAY=0` skips the overlay and uses the tab.
+
 ## [0.1.0] — 2026-10-27
 
 The first release. macOS only.

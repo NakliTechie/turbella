@@ -5,7 +5,7 @@
 // result, or throws an Error whose message is fit to show.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -121,13 +121,26 @@ function overlayPid() {
 async function overlay() {
   const bin = nativeHelper();
   const url = `http://127.0.0.1:${(await ensureDaemon()).port}`;
-  const running = overlayPid();
-  if (running) return { pid: running, url, already: true };
-  const child = spawn(bin, ['overlay', url, OVERLAY_PID], { stdio: 'ignore', detached: true });
-  await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
-  child.unref();
-  writeFileSync(OVERLAY_PID, String(child.pid));
-  return { pid: child.pid, url };
+  // A lock directory makes concurrent callers (several sessions starting at
+  // once) start one overlay between them. A lock older than 20 s is stale.
+  const lock = `${OVERLAY_PID}.lock`;
+  for (let i = 0; ; i++) {
+    try { mkdirSync(lock); break; } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      try { if (Date.now() - statSync(lock).mtimeMs > 20000) { rmSync(lock, { recursive: true }); continue; } } catch {}
+      if (i >= 20) { const r = overlayPid(); if (r) return { pid: r, url, already: true }; throw new Error('another overlay start is in progress'); }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+  try {
+    const running = overlayPid();
+    if (running) return { pid: running, url, already: true };
+    const child = spawn(bin, ['overlay', url, OVERLAY_PID], { stdio: 'ignore', detached: true });
+    await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
+    child.unref();
+    writeFileSync(OVERLAY_PID, String(child.pid));
+    return { pid: child.pid, url };
+  } finally { rmSync(lock, { recursive: true, force: true }); }
 }
 
 // Runs in the foreground with this terminal; resolves to the agent's exit code.

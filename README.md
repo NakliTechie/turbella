@@ -59,8 +59,8 @@ Nothing plays aloud. It needs WebGL 2; without it the page sends you to the time
 
 **The timeline** (`/`) is the plain record: what happened, when, and how often it repeated.
 
-**Beside your agents** (macOS): `turbella overlay` opens a small always-on-top window per agent
-session, and `turbella run <agent>` pins that agent's own gauge to the terminal's top row.
+**Beside your agents** (macOS): `turbella overlay` opens one small always-on-top window that lists every agent session
+(a menu item switches to one window per session), and `turbella run <agent>` pins that agent's own gauge to the terminal's top row.
 
 ![A terminal under turbella run: the strip on the top row shows the gauge at 0.40 and Bash running for 7 s above failing test output](marketing/strip.png)
 
@@ -86,7 +86,7 @@ shell command shows as a normal call. Any other app can send events and read the
 
 ```
 turbella open                     # start the daemon if needed, open the visualiser
-turbella overlay                  # always-on-top windows, one per agent session (macOS, swiftc)
+turbella overlay                  # one always-on-top window for all agent sessions (macOS, swiftc)
 turbella run claude               # any agent, with its own gauge strip on the terminal's top row
 turbella status                   # events, counts by kind, the gauge, as JSON
 turbella emit --kind tool_fail --tool Bash --payload '"exit 1"'   # send one event

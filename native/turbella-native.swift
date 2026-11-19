@@ -69,7 +69,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSWindowDelegate {
   var session: URLSession!
   var timer: Timer?
   let defaults = UserDefaults(suiteName: "com.naklitechie.turbella.overlay") ?? .standard
-  var perSession: Bool { defaults.object(forKey: "perSession") as? Bool ?? true }
+  var perSession: Bool { defaults.object(forKey: "perSession") as? Bool ?? false }
   var opacity: CGFloat { defaults.object(forKey: "opacity") as? CGFloat ?? 1 }
   var clickThrough = false
 

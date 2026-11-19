@@ -13,6 +13,9 @@
 // page address for the person.
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { statSync, writeFileSync, unlinkSync } from 'node:fs';
 import { deliver } from '../src/socketWrite.js';
 import { readState } from '../src/paths.js';
 import { contentHash } from '../src/crypto.js';
@@ -25,12 +28,28 @@ setTimeout(() => process.exit(0), HARD_EXIT_MS).unref();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Open the page in the default browser unless one is already connected.
+// Show Turbella once, however many sessions start together. On macOS the first
+// choice is the one floating window that lists every session (`turbella
+// overlay`, which holds a lock so concurrent starts share one window). Without
+// macOS or the helper, one browser tab opens, guarded by a lock so concurrent
+// sessions open at most one. Nothing opens while a page is already connected.
 async function openIfNoPage(url) {
   try {
     const { pages } = await (await fetch(`${new URL(url).origin}/status`, { signal: AbortSignal.timeout(500) })).json();
     if (pages > 0) return;
   } catch { return; }
+  if (process.platform === 'darwin' && process.env.TURBELLA_OVERLAY !== '0') {
+    const ok = await new Promise((resolve) => {
+      const c = spawn(process.execPath, [fileURLToPath(new URL('./turbella', import.meta.url)), 'overlay'], { stdio: 'ignore' });
+      c.on('error', () => resolve(false));
+      c.on('exit', (code) => resolve(code === 0));
+      setTimeout(() => resolve(true), 1800).unref(); // slow first build: let it finish, do not add a tab
+    });
+    if (ok) return;
+  }
+  const lock = join(homedir(), '.turbella-tab.lock');
+  try { if (Date.now() - statSync(lock).mtimeMs > 30000) unlinkSync(lock); } catch {}
+  try { writeFileSync(lock, String(process.pid), { flag: 'wx' }); } catch { return; } // another session just opened the tab
   const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
   const child = spawn(opener, [url], { stdio: 'ignore', detached: true });
   child.on('error', () => {});
